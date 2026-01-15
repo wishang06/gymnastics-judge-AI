@@ -1,0 +1,46 @@
+{
+  "video_info": {
+    "total_frames": 253,
+    "fps": 30,
+    "duration_seconds": 8.433333333333334,
+    "resolution": "720x1280"
+  },
+  "peak_performance": {
+    "frame": 210,
+    "timestamp": 7.0,
+    "measurements": {
+      "leg_split_180": {
+        "angle_between_legs_degrees": 232.1251176354246,
+        "deviation_from_180_degrees": 52.1251176354246,
+        "left_leg_straightness_degrees": 127.2209140933862,
+        "right_leg_straightness_degrees": 211.66727156406301,
+        "lower_foot": "left",
+        "is_perfect_180": false
+      },
+      "balance_no_hands_ground": {
+        "left_wrist_y_normalized": 0.6090252995491028,
+        "right_wrist_y_normalized": 0.6086112856864929,
+        "ground_reference_y_normalized": 0.5437626838684082,
+        "left_hand_touching": true,
+        "right_hand_touching": true,
+        "any_hand_touching": true,
+        "balance_maintained": false
+      },
+      "releve_tip_toed": {
+        "left_leg_vertical_angle_degrees": 23.26370947039481,
+        "right_leg_vertical_angle_degrees": 29.498974909728997,
+        "left_knee_angle_degrees": 127.2209140933862,
+        "right_knee_angle_degrees": 211.66727156406301,
+        "left_ankle_raised": false,
+        "right_ankle_raised": true,
+        "both_feet_releve": false
+      }
+    }
+  },
+  "summary_statistics": {
+    "max_split_angle": 232.1251176354246,
+    "balance_maintained_at_peak": false,
+    "releve_maintained_at_peak": false,
+    "overall_balance_percentage": 65.85365853658536
+  }
+}
