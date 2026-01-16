@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: gymnastics-judge-ai
+Version: 0.1.0
+Summary: AI Gymnastics Judge using Computer Vision and LLMs
+Requires-Python: >=3.12
+Requires-Dist: opencv-python>=4.10.0
+Requires-Dist: mediapipe>=0.10.18
+Requires-Dist: numpy>=1.26.0
+Requires-Dist: google-generativeai>=0.8.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: rich>=13.0.0
+Requires-Dist: typer>=0.9.0
+Requires-Dist: dotenv>=0.9.9
+Requires-Dist: google>=3.0.0

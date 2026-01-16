@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/gymnastics_judge/cli.py
+src/gymnastics_judge/config.py
+src/gymnastics_judge/core.py
+src/gymnastics_judge/tools/pose_analyzer.py
+src/gymnastics_judge_ai.egg-info/PKG-INFO
+src/gymnastics_judge_ai.egg-info/SOURCES.txt
+src/gymnastics_judge_ai.egg-info/dependency_links.txt
+src/gymnastics_judge_ai.egg-info/requires.txt
+src/gymnastics_judge_ai.egg-info/top_level.txt
