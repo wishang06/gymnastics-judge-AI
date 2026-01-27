@@ -74,120 +74,88 @@ async def run_judge_system():
 
     # 5. LLM Evaluation
     with console.status("[bold yellow]Consulting AI Judge...[/bold yellow]"):
-        # System prompt with the complete Penche rules
+        # System prompt for Penche judging (D/E scoring)
         system_prompt = """
-        You are an expert Gymnastics Judge specializing in the 'Penche (2.1106)' balance difficulty.
-        Your task is to audit a video analysis of a gymnastics element and provide a formal judging conclusion.
+        You are an expert gymnastics judge. You MUST compute the D-score contribution (DB) and total E-score deductions
+        for the Penche element (2.1106) using ONLY the provided computer-vision JSON.
 
-        ## Penche (2.1106) Action Audit Checklist
+        ## Penche: D-Score & E-Score Breakdown (Authoritative Rules)
 
-        ### 1. Basic Validity Audit
+        ### A) Angular Deviation (Split Opening)
+        Use the split opening during the hold window.
 
-        Before analyzing details, confirm the movement satisfies basic characteristics of a balance difficulty:
+        Let:
+        - split_angle_deg = `hold_window_1s.min_split_angle_during_hold`
+        - effective_angle = clamp the split angle into [0, 180] using:
+          effective_angle = min(split_angle_deg, 360 - split_angle_deg) if split_angle_deg > 180 else split_angle_deg
+          then effective_angle = min(max(effective_angle, 0), 180)
+        - deviation_deg = max(0, 180 - effective_angle)
 
-        *   **Shape Definition:** Back split (with or without help), trunk leaning forward to horizontal position or below horizontal.
-        *   **Hold Requirement:** Must be fixed in the established shape for at least **1 second**.
-            *   If duration < 1 second but shape is clear: **DB is valid**, Execution (E-score) deduction of **0.30**.
-            *   If there is no hold at all (manifested as a kick or swing): **DB is invalid (DB = 0)**.
-        *   **Apparatus Coordination:** Must coordinate at least **1 apparatus technical element** during the hold (assume this is satisfied unless explicitly contradicted).
-        *   **Prohibition of Support:** Strictly forbidden to support with hands on the support leg, use apparatus to support on floor, or have body touch floor; otherwise **DB is invalid**.
+        Rules:
+        - deviation_deg == 0°: D valid (DB = 0.5); E deduction 0.0
+        - 1° to 10° deviation: D valid (DB = 0.5); E deduction -0.1
+        - 11° to 19° deviation: D valid (DB = 0.5); E deduction -0.3
+        - deviation_deg >= 20°: D invalid (DB = 0.0); E deduction -0.5
 
-        ---
+        ### B) Time (Duration of Hold)
+        The CV tool defines the hold segment start/end as the maximal contiguous region around the best hands-off peak
+        where the split angle remains stable (frame-to-frame change <= `hold_window_1s.angle_stability_threshold_deg`)
+        AND the split stays near peak (within `hold_window_1s.near_peak_tolerance_deg` of `hold_window_1s.peak_effective_split_angle_deg`).
 
-        ### 2. Geometric Shape Audit
+        Use the CV-provided duration (timestamp-based):
+        - hold_seconds = `hold_window_1s.duration_seconds`
 
-        Use the "Vertical Red Line Method" to audit the working leg (split opening) and trunk position:
+        Rules:
+        - hold_seconds < 1.0s: D invalid (DB = 0.0)
+        - 0.5s to 1.0s (inclusive of 1.0): D valid (DB = 0.5); E deduction -0.3
+        - > 1.0s: D valid (DB = 0.5); E deduction 0.0
 
-        **Split Opening:**
-        *   **Perfect Technical Standard:** The angle between the working leg and vertical reference line reaches 180° (i.e., reaching a split).
-        *   **Small Deviation (170°-179°):** DB valid, E-score deduction **0.10**.
-        *   **Medium Deviation (160°-169°):** DB valid, E-score deduction **0.30**.
-        *   **Large Deviation (<160°):** DB invalid, E-score deduction **0.50**.
+        ### C) Disqualification & Stability
+        D invalid (DB = 0.0) if:
+        - Hand Support: if `hold_window_1s.balance_maintained_throughout` is false (hands touched ground)
+          then E deduction -0.5 and DB = 0.0.
 
-        **Trunk Position:**
-        *   **Perfect Technical Standard:** Trunk must be in horizontal position or below horizontal.
-        *   **Trunk slightly high (Medium Deviation):** DB valid, E-score deduction **0.30**.
-        *   **Significantly above horizontal (Large Deviation):** DB invalid.
+        Other disqualifiers mentioned in the rulebook (knee support, falling) are NOT measured by the CV tool.
+        Do NOT invent them. Mark as \"Not measured\" and apply 0 deduction for those items.
 
-        **Note:** The data provided measures the angle between the two legs at the hip (mid-hip point). For a perfect 180° split, this angle should be 180°. Use the `min_split_angle_during_hold` value for your assessment.
+        Stability deductions (minor/s significant movement) are NOT measured by the CV tool. Do NOT invent them.
+        Mark as \"Not measured\" and apply 0 deduction.
 
-        ---
+        ### D) Support Foot / Relevé
+        The CV tool provides:
+        - `hold_window_1s.releve_maintained_majority` (boolean)
 
-        ### 3. Support Status & Value Audit
-
-        Determine the final value based on the status of the support foot:
-
-        **Relevé:**
-        *   The heel must be clearly lifted and locked.
-        *   **Value Determination:** Recognized at the original value in the Difficulty Table (0.50).
-        *   **Stability Check:** Slight wobbling permitted; DB remains valid, but E-score deduction may be required.
-
-        **Flat Foot:**
-        *   **Value Determination:** **Reduce by 0.10** from the original difficulty value (0.50 → 0.40).
-        *   **Symbol Notation:** Include a downward arrow (↓) in notation.
-
-        ---
-
-        ### 4. Dynamic Disqualification Audit
-
-        If any of the following occur, immediately determine difficulty value to be **0**:
-
-        *   **Loss of Balance:** Supporting on floor with hands, non-supporting leg, or apparatus to maintain balance.
-        *   **Apparatus Drop:** Losing apparatus during execution (assume not applicable unless data indicates otherwise).
-        *   **Shape Disintegration:** Trunk rising significantly or working leg height dropping before 1-second hold completed.
-        *   **Out of Bounds or Overtime:** Starting outside carpet or completing after music ends (assume not applicable).
+        This is NOT part of the D/E breakdown above, but we still report it:
+        - If false, note: \"Flat foot / no consistent relevé detected\".
+        (Do not apply extra deductions unless explicitly requested by the D/E breakdown rules.)
 
         ---
 
-        ### DATA INTERPRETATION GUIDE
+        ## Required Output (STRICT FORMAT)
+        Output exactly these sections and keys every time:
 
-        You will receive JSON data with the following structure:
+        ### Judge Summary
+        - **Element**: Penche (2.1106)
+        - **DB (D-score contribution)**: 0.5 or 0.0
+        - **Total E-score deduction**: a culmulative negative number
 
-        **Key Fields:**
-        *   `hold_window_1s.min_split_angle_during_hold`: **CRITICAL** - This is the minimum split angle during the 1-second hold window. Use this for Split Opening audit.
-        *   `hold_window_1s.balance_maintained_throughout`: **CRITICAL** - If `false`, apply "Loss of Balance" → **DB = 0**.
-        *   `hold_window_1s.releve_maintained_majority`: If `false`, apply "Flat Foot" → reduce value by 0.10.
-        *   `hold_window_1s.duration_frames`: Check if hold was >= 1 second (compare to video_info.fps).
-        *   `peak_performance.measurements.leg_split_180.angle_between_legs_degrees`: Maximum angle reached (for reference in Shape Establishment).
+        ### Computed Metrics (from CV JSON)
+        - **hold_seconds**: <number>
+        - **split_angle_deg (raw)**: <number>
+        - **effective_angle_deg (clamped)**: <number>
+        - **deviation_deg**: <number>
+        - **balance_maintained_throughout**: true/false
+        - **releve_maintained_majority**: true/false
 
-        **Important:** The `min_split_angle_during_hold` is the value that matters for judging the hold quality. If it's very low (<160°), the hold was poor even if the peak was high.
+        ### D/E Rule Application
+        - **Angle rule**: (state which bucket triggered, and the E deduction)
+        - **Time rule**: (state which bucket triggered, and the E deduction)
+        - **Disqualification rule**: (state if triggered; if triggered DB=0.0 and E=-0.5)
+        - **Stability/Knee/Fall**: Not measured (E=0.0)
 
-        ---
-
-        ### OUTPUT FORMAT
-
-        Produce a report strictly following this template. Use clear, professional language. Do not include JSON in the output.
-
-        **Judge Audit Conclusion Template:**
-
-        *   **Difficulty Number:** 2.1106 (Penche Balance)
-        
-        *   **1. Shape Establishment:** 
-            [State when/if the trunk reached horizontal and the working leg established the split shape. Reference the peak_performance frame/timestamp if available. If shape was never clearly established, state this and mark DB as invalid.]
-        
-        *   **2. Hold Time:** 
-            [Analyze the hold_window_1s data. State the duration (should be ~1 second). Quote the exact `min_split_angle_during_hold` value. If < 1 second but shape clear, note the 0.30 deduction. If no hold (angle drops to near 0), mark as kick/swing → DB invalid.]
-        
-        *   **3. Geometric Analysis:** 
-            [Apply Split Opening deductions based on `min_split_angle_during_hold`:
-            - If >= 180°: "Working leg reaches perfect 180° split, no deviation."
-            - If 170-179°: "Working leg deviates from vertical line by approximately [X]° (Small Deviation), deduct 0.10."
-            - If 160-169°: "Working leg deviates by approximately [X]° (Medium Deviation), deduct 0.30."
-            - If < 160°: "Working leg deviates significantly by [X]° (Large Deviation), DB invalid, deduct 0.50."
-            Also assess trunk position if data is available.]
-        
-        *   **4. Support Status:** 
-            [State if Relevé was maintained based on `releve_maintained_majority`. If false: "Flat foot detected, reduce DB value by 0.10 (0.50 → 0.40)." If true: "Heel is locked in Relevé, no value reduction."]
-        
-        *   **5. Final Determination:** 
-            *   **DB Status:** [Valid / Invalid]
-            *   **Value:** [If valid: Start at 0.50. Subtract 0.10 if Flat Foot. If invalid: 0.00]
-            *   **Total Execution Deductions:** [Sum all E-score deductions: hold time (0.30 if <1s), split deviation (0.10/0.30/0.50), trunk position (0.30 if applicable)]
-        
-        **Example Conclusion:**
-        "DB valid, value 0.40 (reduced from 0.50 due to flat foot), Execution deduction of 0.10 (small split deviation)."
-        OR
-        "DB invalid (DB = 0) due to loss of balance (hands touched ground)."
+        ### Final Notes
+        - 1–3 short bullet comments explaining WHY the deductions happened using the computed metrics.
+        - Do not mention \"training data\".
         """
         
         verdict = await agent.evaluate(raw_data, system_prompt)
