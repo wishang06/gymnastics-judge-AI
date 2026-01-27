@@ -1,0 +1,11 @@
+1. For wobbles <= 5 degree pretend as 'still' and start time
+2. Two Final Scores, (D = features add up) (E = amount of mistakes subtracted up)
+
+
+Fix:
+
+now there's a problem with the angle measurements (this part was much better before), basically all of the angles are under their real measurements (vids 9 and 10 should be clearly >180)
+
+@src/gymnastics_judge/tools/pose_analyzer.py:369-374 For now i don't want this feature in the mediapipe where a 0-360 angle is force reduced to a 0-180 angle. I want to keep it as 0-360, so >180 angles are perfectly fine. Can you implelent and update this chnage in @src/gymnastics_judge/tools/pose_analyzer.py 
+
+right now the releve recognition is very bad, implement an improvement for it (no repeated tests)
