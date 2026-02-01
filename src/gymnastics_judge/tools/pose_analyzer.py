@@ -13,11 +13,12 @@ class Point:
         self.y = y
 
 class PencheAnalyzer:
-    name = "Penche Analyzer (2.1106)"
-    description = "Analyzes gymnastics penche balance using MediaPipe Pose to check split angle, balance, and releve."
+    name = "Penche (2.1106)"
+    description = "Penche balance: split angle, hold time, hand support and relevé (MediaPipe + Gemini vision)."
 
     def __init__(self, *, show_video: bool = True):
         self.show_video = show_video
+        self.video_dir = "videos/penche"
         # Initialize MediaPipe options
         self.model_path = self._find_model()
         if not self.model_path:
