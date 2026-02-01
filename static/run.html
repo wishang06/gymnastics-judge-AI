@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>分析结果 — AI 体操裁判</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .media-container {
+      background: var(--bg-card);
+      border-radius: 12px;
+      padding: 1rem;
+      margin: 1rem 0;
+      text-align: center;
+    }
+    .media-container video, .media-container img { max-width: 100%; border-radius: 8px; }
+    .report-buttons { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem; }
+    .report-buttons .btn { margin-right: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">分析结果</h1>
+    <p class="page-subtitle" id="subtitle"></p>
+    <div id="loading" class="loading">正在分析，请稍候…（可能需要 1–2 分钟）</div>
+    <div id="error" class="error-msg" style="display:none;"></div>
+    <div id="result" style="display:none;">
+      <div class="card">
+        <div class="card-title" id="media-title">视频 / 峰值图像</div>
+        <div class="media-container" id="media-container"></div>
+      </div>
+      <div class="report-buttons">
+        <a href="/simple-report" class="btn btn-primary" id="btn-simple">查看简易动作报告</a>
+        <a href="/comprehensive-report" class="btn btn-secondary" id="btn-comprehensive">查看综合报告</a>
+      </div>
+    </div>
+    <div class="nav-links">
+      <a href="/select-tool">← 重新选择工具与视频</a>
+    </div>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const toolId = params.get("tool") || "1";
+    const videoId = params.get("video_id");
+    const RUN_RESULT_KEY = "gymnastics_run_result";
+    const RUN_TOOL_KEY = "gymnastics_run_tool";
+    const RUN_VIDEO_ID_KEY = "gymnastics_run_video_id";
+
+    if (videoId === null || videoId === "") {
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("error").style.display = "block";
+      document.getElementById("error").textContent = "请先选择视频。";
+      document.getElementById("error").innerHTML += ' <a href="/select-file?tool=' + toolId + '">去选择视频</a>';
+      throw new Error("no video");
+    }
+
+    document.getElementById("subtitle").textContent = "工具 " + toolId + " · 视频 #" + videoId;
+
+    // If we already have result for this tool+video (e.g. back from report), show it without re-running
+    const cached = sessionStorage.getItem(RUN_RESULT_KEY);
+    const cachedTool = sessionStorage.getItem(RUN_TOOL_KEY);
+    const cachedVideoId = sessionStorage.getItem(RUN_VIDEO_ID_KEY);
+    if (cached && cachedTool === toolId && cachedVideoId === String(videoId)) {
+      try {
+        const data = JSON.parse(cached);
+        sessionStorage.setItem(RUN_TOOL_KEY, toolId);
+        sessionStorage.setItem(RUN_VIDEO_ID_KEY, String(videoId));
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("result").style.display = "block";
+        const media = document.getElementById("media-container");
+        if (data.is_penche && data.video_url) {
+          const video = document.createElement("video");
+          video.controls = true;
+          video.src = data.video_url;
+          video.style.maxWidth = "100%";
+          media.appendChild(video);
+        } else if (data.peak_image_url) {
+          const img = document.createElement("img");
+          img.src = data.peak_image_url;
+          img.alt = "峰值帧";
+          img.style.maxWidth = "100%";
+          media.appendChild(img);
+        } else {
+          media.textContent = "无视频或图像可显示。";
+        }
+      } catch (e) { /* fall through to run */ }
+    } else {
+    fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool_id: toolId, video_id: parseInt(videoId, 10) })
+    })
+      .then(r => r.json().then(data => ({ status: r.status, data })))
+      .then(({ status, data }) => {
+        document.getElementById("loading").style.display = "none";
+        if (status !== 200 || data.error) {
+          document.getElementById("error").style.display = "block";
+          document.getElementById("error").textContent = data.error || "分析失败，请稍后重试。";
+          return;
+        }
+        sessionStorage.setItem(RUN_RESULT_KEY, JSON.stringify(data));
+        sessionStorage.setItem(RUN_TOOL_KEY, toolId);
+        sessionStorage.setItem(RUN_VIDEO_ID_KEY, String(videoId));
+        document.getElementById("result").style.display = "block";
+        const media = document.getElementById("media-container");
+        if (data.is_penche && data.video_url) {
+          const video = document.createElement("video");
+          video.controls = true;
+          video.src = data.video_url;
+          video.style.maxWidth = "100%";
+          media.appendChild(video);
+        } else if (data.peak_image_url) {
+          const img = document.createElement("img");
+          img.src = data.peak_image_url;
+          img.alt = "峰值帧";
+          img.style.maxWidth = "100%";
+          media.appendChild(img);
+        } else {
+          media.textContent = "无视频或图像可显示。";
+        }
+      })
+      .catch(err => {
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("error").style.display = "block";
+        document.getElementById("error").textContent = "请求失败：" + (err.message || "请稍后重试。");
+      });
+    }
+  </script>
+</body>
+</html>

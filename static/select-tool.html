@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>选择分析工具 — AI 体操裁判</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .tools-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+    .tool-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .tool-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--accent);
+    }
+    .tool-card h3 { margin: 0 0 0.5rem 0; font-size: 1.15rem; }
+    .tool-card p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">选择分析工具</h1>
+    <p class="page-subtitle">请选择要使用的动作类型</p>
+    <div class="tools-grid" id="tools-grid"></div>
+    <div class="nav-links">
+      <a href="/">← 返回首页</a>
+    </div>
+  </div>
+  <script>
+    const tools = [
+      { id: "1", name: "平衡腿结环 (Penche 2.1106)", desc: "平衡类：劈叉开度、保持时间、手支撑与 relevé" },
+      { id: "2", name: "交换腿鹿跳结环 (1.2096)", desc: "艺术体操跳步：劈叉与结环角度审计" },
+      { id: "3", name: "分腿跳结环 (1.2105)", desc: "艺术体操跳步：分腿与结环角度审计" }
+    ];
+    const grid = document.getElementById("tools-grid");
+    tools.forEach(t => {
+      const card = document.createElement("a");
+      card.className = "tool-card";
+      card.href = "/select-file?tool=" + t.id;
+      card.innerHTML = `<h3>${t.name}</h3><p>${t.desc}</p>`;
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>

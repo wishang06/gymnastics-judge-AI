@@ -140,6 +140,24 @@ async def run_judge_system():
         if peak_image:
             console.print(f"Peak frame saved: [dim]{peak_image}[/dim]")
         console.print(Panel(score_text.strip(), title=f"FIG Audit — {selected_tool.name}", border_style="green"))
+
+        # Simple Move Report (Chinese) — separate call
+        from .core import JudgeAgent
+        agent = JudgeAgent()
+        with console.status("[bold yellow]生成简易动作报告（中文）...[/bold yellow]"):
+            try:
+                simple_report = await agent.simple_move_report(selected_tool.name, raw_data)
+                console.print(Panel(simple_report.strip(), title="简易动作报告 (Simple Move Report)", border_style="cyan"))
+            except Exception as e:
+                console.print(f"[red]简易动作报告生成失败:[/red] {e}")
+
+        # Comprehensive Report (Chinese) — separate call
+        with console.status("[bold yellow]生成综合报告（中文）...[/bold yellow]"):
+            try:
+                comprehensive = await agent.comprehensive_report(selected_tool.name, raw_data)
+                console.print(Panel(comprehensive.strip(), title="综合报告 (Comprehensive Report)", border_style="magenta"))
+            except Exception as e:
+                console.print(f"[red]综合报告生成失败:[/red] {e}")
         return
 
     if raw_data.get('peak_performance'):
@@ -325,6 +343,26 @@ async def run_judge_system():
         fallback = re.sub(r"^```(?:json)?\s*\n?", "", verdict.strip())
         fallback = re.sub(r"\n?```\s*$", "", fallback)
         console.print(Panel(fallback or verdict, title="Final Judge Verdict", border_style="blue"))
+
+    # 10. Simple Move Report (Chinese, ~100 words) — separate call
+    with console.status("[bold yellow]生成简易动作报告（中文）...[/bold yellow]"):
+        try:
+            simple_report = await agent.simple_move_report(
+                selected_tool.name, raw_data, judge_verdict=verdict
+            )
+            console.print(Panel(simple_report.strip(), title="简易动作报告 (Simple Move Report)", border_style="cyan"))
+        except Exception as e:
+            console.print(f"[red]简易动作报告生成失败:[/red] {e}")
+
+    # 11. Comprehensive Report (Chinese, ~200 words) — separate call
+    with console.status("[bold yellow]生成综合报告（中文）...[/bold yellow]"):
+        try:
+            comprehensive = await agent.comprehensive_report(
+                selected_tool.name, raw_data, judge_verdict=verdict
+            )
+            console.print(Panel(comprehensive.strip(), title="综合报告 (Comprehensive Report)", border_style="magenta"))
+        except Exception as e:
+            console.print(f"[red]综合报告生成失败:[/red] {e}")
 
 def main():
     asyncio.run(run_judge_system())
