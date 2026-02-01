@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>选择视频 — AI 体操裁判</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .video-list { list-style: none; padding: 0; margin: 0; }
+    .video-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.5rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .video-item:hover { background: var(--bg-card-hover); }
+    .video-item.selected { border-color: var(--accent); background: rgba(59, 130, 246, 0.1); }
+    .empty-msg { color: var(--text-muted); padding: 2rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">选择视频</h1>
+    <p class="page-subtitle" id="subtitle">正在加载视频列表…</p>
+    <div id="loading" class="loading">加载中…</div>
+    <ul class="video-list" id="video-list" style="display:none;"></ul>
+    <p id="empty-msg" class="empty-msg" style="display:none;">该分类下暂无视频。请将 .mp4 或 .mov 放入对应文件夹。</p>
+    <p style="margin-top:1rem;">
+      <a href="#" id="btn-run" class="btn btn-primary" style="display:none;">开始分析</a>
+    </p>
+    <div class="nav-links" style="margin-top:1rem;">
+      <a href="/select-tool">← 更换分析工具</a>
+    </div>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const toolId = params.get("tool") || "1";
+    const toolNames = { "1": "平衡腿结环 (Penche)", "2": "交换腿鹿跳结环 (1.2096)", "3": "分腿跳结环 (1.2105)" };
+    document.getElementById("subtitle").textContent = "工具：" + (toolNames[toolId] || toolId);
+
+    fetch("/api/tools/" + toolId + "/videos")
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById("loading").style.display = "none";
+        if (data.videos && data.videos.length > 0) {
+          const list = document.getElementById("video-list");
+          list.style.display = "block";
+          data.videos.forEach((v, i) => {
+            const li = document.createElement("li");
+            li.className = "video-item";
+            li.textContent = v.name;
+            li.dataset.id = v.id;
+            li.dataset.path = v.path;
+            li.onclick = () => {
+              document.querySelectorAll(".video-item").forEach(el => el.classList.remove("selected"));
+              li.classList.add("selected");
+              window.selectedVideo = { id: v.id, path: v.path, name: v.name };
+              document.getElementById("btn-run").style.display = "inline-block";
+            };
+            list.appendChild(li);
+          });
+        } else {
+          document.getElementById("empty-msg").style.display = "block";
+        }
+      })
+      .catch(() => {
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("empty-msg").style.display = "block";
+        document.getElementById("empty-msg").textContent = "加载视频列表失败，请稍后重试。";
+      });
+
+    document.getElementById("btn-run").onclick = function(e) {
+      e.preventDefault();
+      if (!window.selectedVideo) return;
+      location.href = "/run?tool=" + encodeURIComponent(toolId) + "&video_id=" + encodeURIComponent(window.selectedVideo.id);
+    };
+  </script>
+</body>
+</html>

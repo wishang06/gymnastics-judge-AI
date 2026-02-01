@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>简易动作报告 — AI 体操裁判</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .report-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      margin: 1rem 0;
+      border-left: 4px solid var(--accent);
+    }
+    .report-panel .report-content { margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">简易动作报告</h1>
+    <p class="page-subtitle">约 100 字：D 分、E 分、得分点/扣分点、一句话总结</p>
+    <div id="no-data" class="loading" style="display:none;">暂无报告数据，请先完成一次分析。</div>
+    <div id="report-panel" class="report-panel" style="display:none;">
+      <div class="report-content" id="report-content"></div>
+    </div>
+    <div class="nav-links">
+      <a href="/run" id="back-run">← 返回分析结果</a>
+      <a href="/comprehensive-report">查看综合报告</a>
+      <a href="/select-tool">重新选择</a>
+    </div>
+  </div>
+  <script>
+    const RUN_RESULT_KEY = "gymnastics_run_result";
+    const RUN_TOOL_KEY = "gymnastics_run_tool";
+    const RUN_VIDEO_ID_KEY = "gymnastics_run_video_id";
+    const raw = sessionStorage.getItem(RUN_RESULT_KEY);
+    const tool = sessionStorage.getItem(RUN_TOOL_KEY);
+    const videoId = sessionStorage.getItem(RUN_VIDEO_ID_KEY);
+    if (tool && videoId) document.getElementById("back-run").href = "/run?tool=" + encodeURIComponent(tool) + "&video_id=" + encodeURIComponent(videoId);
+    if (!raw) {
+      document.getElementById("no-data").style.display = "block";
+      document.getElementById("back-run").href = "/select-tool";
+    } else {
+      try {
+        const data = JSON.parse(raw);
+        const text = data.simple_report || "（无简易报告内容）";
+        document.getElementById("report-panel").style.display = "block";
+        document.getElementById("report-content").textContent = text;
+      } catch (e) {
+        document.getElementById("no-data").style.display = "block";
+      }
+    }
+  </script>
+</body>
+</html>

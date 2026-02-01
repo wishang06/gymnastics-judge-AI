@@ -610,6 +610,28 @@ class JudgeAgent:
             },
         }
     
+    async def _generate_content(self, user_prompt: str) -> str:
+        """Call Gemini with retry over model names. Returns response.text."""
+        model_names_to_try = self._model_names_to_try()
+        last_error = None
+        for model_name in model_names_to_try:
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=model_name,
+                    contents=user_prompt
+                )
+                return response.text
+            except Exception as e:
+                last_error = e
+                if "404" not in str(e) and "not found" not in str(e).lower():
+                    raise
+                continue
+        raise RuntimeError(
+            f"Could not find a valid Gemini model. Tried: {model_names_to_try}. "
+            f"Last error: {last_error}. "
+            f"Please check your API key and available models."
+        ) from last_error
+
     async def evaluate(self, tool_output: Dict[str, Any], context_prompt: str) -> str:
         """
         Send tool output to LLM for evaluation
@@ -623,27 +645,61 @@ class JudgeAgent:
         
         Please provide your judging assessment based on the rules provided.
         """
-        
-        model_names_to_try = self._model_names_to_try()
-        
-        last_error = None
-        for model_name in model_names_to_try:
-            try:
-                response = await self.client.aio.models.generate_content(
-                    model=model_name,
-                    contents=full_prompt
-                )
-                return response.text
-            except Exception as e:
-                last_error = e
-                if "404" not in str(e) and "not found" not in str(e).lower():
-                    # If it's not a 404, it's a different error, raise it
-                    raise
-                continue
-        
-        # If all models failed, raise the last error with helpful message
-        raise RuntimeError(
-            f"Could not find a valid Gemini model. Tried: {model_names_to_try}. "
-            f"Last error: {last_error}. "
-            f"Please check your API key and available models."
-        ) from last_error
+        return await self._generate_content(full_prompt)
+
+    async def simple_move_report(
+        self,
+        tool_name: str,
+        tool_output: Dict[str, Any],
+        judge_verdict: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a short move report in Chinese (~100 words): D score, E score,
+        得分点/扣分点 in words, and one-sentence summary. Used for all three tools.
+        """
+        import json
+        data_blob = json.dumps(tool_output, indent=2, ensure_ascii=False)
+        verdict_blob = f"\n\n裁判详细结论（供参考）：\n{judge_verdict}" if judge_verdict else ""
+        prompt = f"""你是一位体操裁判。请根据以下技术数据，用中文写一份「简易动作报告」（约100字）。
+
+要求（必须全部用中文，且按此顺序）：
+1. D分：说明有效或无效，以及难度分（0 或 0.5 等，视动作而定）。
+2. E分：说明扣分情况（负数）。
+3. 得分点与扣分点：用文字简要列出主要数据和要点，不要只堆数字。
+4. 最后一句话总结该次动作表现。
+
+技术数据（JSON）：
+{data_blob}
+{verdict_blob}
+
+请直接输出中文报告，不要输出 JSON 或代码块。"""
+        return await self._generate_content(prompt)
+
+    async def comprehensive_report(
+        self,
+        tool_name: str,
+        tool_output: Dict[str, Any],
+        judge_verdict: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a student-oriented comprehensive report in Chinese (~200 words):
+        well-done points, improvement points, recommended next steps.
+        """
+        import json
+        data_blob = json.dumps(tool_output, indent=2, ensure_ascii=False)
+        verdict_blob = f"\n\n裁判详细结论（供参考）：\n{judge_verdict}" if judge_verdict else ""
+        prompt = f"""你是一位体操教练/裁判。请根据以下技术数据与裁判结论，用中文写一份「综合报告」（约200字），面向学生/运动员。
+
+动作/工具名称：{tool_name}
+
+要求（全部用中文）：
+1. 做得好的地方：约3句话/要点。
+2. 需要改进的地方：约3句话/要点。
+3. 建议的下一步改进：约2～3句话/要点。
+
+技术数据（JSON）：
+{data_blob}
+{verdict_blob}
+
+请直接输出中文综合报告，不要输出 JSON 或代码块。"""
+        return await self._generate_content(prompt)

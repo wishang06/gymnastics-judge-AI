@@ -3,7 +3,13 @@ pyproject.toml
 src/gymnastics_judge/cli.py
 src/gymnastics_judge/config.py
 src/gymnastics_judge/core.py
+src/gymnastics_judge/pipeline.py
+src/gymnastics_judge/web_app.py
 src/gymnastics_judge/tools/pose_analyzer.py
+src/gymnastics_judge/tools/rhythmic_element_analyzer.py
+src/gymnastics_judge/tools/rhythmic_engine.py
+src/gymnastics_judge/tools/rhythmic_mediapipe_shim/__init__.py
+src/gymnastics_judge/tools/rhythmic_mediapipe_shim/mediapipe_analyzer.py
 src/gymnastics_judge_ai.egg-info/PKG-INFO
 src/gymnastics_judge_ai.egg-info/SOURCES.txt
 src/gymnastics_judge_ai.egg-info/dependency_links.txt
