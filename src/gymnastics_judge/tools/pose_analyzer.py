@@ -40,6 +40,9 @@ class PencheAnalyzer:
             'LEFT_ANKLE': 27, 'RIGHT_ANKLE': 28,
         }
         
+        # Systematic MediaPipe underestimate: reported angles are 10–15° low; add once to all split angles.
+        self.ANGLE_CORRECTION_DEG = 12.5
+
         # Connections for drawing
         self.POSE_CONNECTIONS = [
             (0, 1), (1, 2), (2, 3), (3, 7), (0, 4), (4, 5), (5, 6), (6, 8), # Face
@@ -100,15 +103,16 @@ class PencheAnalyzer:
                    (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         
         y_pos -= 30
-        balanced = not measurements['balance']['hands_touching_ground']
-        color = (0, 255, 0) if balanced else (0, 0, 255)
-        text = "BALANCED" if balanced else "HANDS DOWN"
-        cv2.putText(frame, f'Balance: {text}', (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-        
-        y_pos -= 30
-        releve_status = "RELEVE" if measurements['releve']['is_releve'] else "FLAT FOOT"
-        releve_color = (0, 255, 0) if measurements['releve']['is_releve'] else (0, 0, 255)
-        cv2.putText(frame, f'Feet: {releve_status}', (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, releve_color, 2)
+        # Relevé is intentionally NOT measured by MediaPipe (handled by LLM vision review later).
+        cv2.putText(
+            frame,
+            "Feet: (LLM review)",
+            (10, y_pos),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (200, 200, 200),
+            2,
+        )
 
     def _find_model(self) -> Optional[str]:
         # Search in current dir and up one level
@@ -222,13 +226,6 @@ class PencheAnalyzer:
                         'left_leg_straightness_degrees': measurements['split']['left_straightness'],
                         'right_leg_straightness_degrees': measurements['split']['right_straightness']
                     },
-                    'balance_no_hands_ground': {
-                        'any_hand_touching': measurements['balance']['hands_touching_ground'],
-                        'balance_maintained': not measurements['balance']['hands_touching_ground']
-                    },
-                    'releve_tip_toed': {
-                        'both_feet_releve': measurements['releve']['is_releve']
-                    }
                 }
 
                 all_measurements.append({
@@ -262,8 +259,6 @@ class PencheAnalyzer:
         right_hip = get_lm('RIGHT_HIP')
         left_ankle = get_lm('LEFT_ANKLE')
         right_ankle = get_lm('RIGHT_ANKLE')
-        left_wrist = get_lm('LEFT_WRIST')
-        right_wrist = get_lm('RIGHT_WRIST')
         left_knee = get_lm('LEFT_KNEE')
         right_knee = get_lm('RIGHT_KNEE')
 
@@ -279,6 +274,13 @@ class PencheAnalyzer:
         angle_ankle = self._calculate_angle(left_ankle, mid_hip, right_ankle)  # [0..180]
         angle_knee_raw_360 = self._calculate_angle_raw_360(left_knee, mid_hip, right_knee)  # [0..360)
         angle_ankle_raw_360 = self._calculate_angle_raw_360(left_ankle, mid_hip, right_ankle)  # [0..360)
+
+        # Apply systematic correction (MediaPipe consistently reports 10–15° low).
+        c = self.ANGLE_CORRECTION_DEG
+        angle_knee = min(180.0, float(angle_knee) + c)
+        angle_ankle = min(180.0, float(angle_ankle) + c)
+        angle_knee_raw_360 = (float(angle_knee_raw_360) + c) % 360.0
+        angle_ankle_raw_360 = (float(angle_ankle_raw_360) + c) % 360.0
 
         angle_between_legs = angle_knee
         angle_between_legs_raw_360 = angle_knee_raw_360
@@ -303,21 +305,6 @@ class PencheAnalyzer:
         left_leg_straight = self._calculate_angle(left_hip, left_knee, left_ankle)
         right_leg_straight = self._calculate_angle(right_hip, right_knee, right_ankle)
 
-        # 2. BALANCE
-        lowest_ankle_y = max(left_ankle.y, right_ankle.y)
-        # Hand support heuristic:
-        # - compare wrist y to the "ground" (ankle y) with a small margin
-        # - require sufficient landmark visibility to avoid false positives
-        ground_threshold = lowest_ankle_y + 0.02
-        left_vis = float(getattr(left_wrist, "visibility", 1.0))
-        right_vis = float(getattr(right_wrist, "visibility", 1.0))
-        hands_touching = ((left_vis >= 0.6 and left_wrist.y > ground_threshold) or (right_vis >= 0.6 and right_wrist.y > ground_threshold))
-
-        # 3. RELEVE
-        left_releve = (left_ankle.y <= left_knee.y + 0.01)
-        right_releve = (right_ankle.y <= right_knee.y + 0.01)
-        both_releve = left_releve and right_releve
-
         return {
             'split': {
                 'angle': angle_between_legs,
@@ -331,25 +318,20 @@ class PencheAnalyzer:
                 'deviation': deviation,
                 'left_straightness': left_leg_straight,
                 'right_straightness': right_leg_straight
-            },
-            'balance': {
-                'hands_touching_ground': hands_touching,
-                'ground_y': lowest_ankle_y
-            },
-            'releve': {
-                'is_releve': both_releve
             }
         }
 
     def _aggregate_results(self, measurements, fps, width, height, total_frames, duration):
         """Aggregate results and compute the hold segment.
 
-        Hold timing logic (as requested):
-        - Hold starts when hands are off the floor AND the split angle is held "still".
-        - "Still" is defined as staying within +/- 5 degrees of the best (max) split angle
-          achieved *while hands are off the floor*.
-        - The hold segment is the maximal contiguous frame range around that peak that
-          satisfies both conditions (hands off + within threshold).
+        Hold timing logic (hands/balance NOT measured by MediaPipe):
+        - We compute the peak split (max effective split).
+        - We search for the best contiguous segment near that peak where the split angle
+          is stable (within +/- ANGLE_STABILITY_DEG) and close to the peak (within
+          NEAR_PEAK_TOLERANCE_DEG).
+
+        Hand support / balance is intentionally NOT detected here (handled by an LLM
+        video review step later in the pipeline).
         """
         # Default empty result structure (match video_analyzer.py exactly)
         result = {
@@ -392,8 +374,7 @@ class PencheAnalyzer:
         if peak_frame is None:
             return result
 
-        # --- Hold segment: hands OFF + angle "still" (max-min <= 5°) ---
-        # This implements the user's definition more directly than anchoring to a single peak frame.
+        # --- Hold segment: angle stability near peak ---
         ANGLE_STABILITY_DEG = 5.0
         # Tolerate landmark dropouts / variable decode cadence (in frames)
         MAX_MISSING_FRAME_GAP = 6
@@ -401,27 +382,6 @@ class PencheAnalyzer:
         frames = [m["frame"] for m in measurements]
         raw_angles_all = [m["measurements"]["leg_split_180"]["angle_between_legs_degrees"] for m in measurements]
         eff_angles_all = [_effective_angle(a) if a is not None else None for a in raw_angles_all]
-        hands_touching_flags = [
-            bool(m["measurements"]["balance_no_hands_ground"]["any_hand_touching"]) for m in measurements
-        ]
-
-        # Debounce hand-touch detection: ignore very short "touch" blips (likely landmark noise).
-        # Treat a hand-touch as real only if it persists for >= 3 consecutive measurement frames.
-        MIN_TOUCH_STREAK = 3
-        debounced = hands_touching_flags[:]
-        i = 0
-        while i < len(debounced):
-            if not debounced[i]:
-                i += 1
-                continue
-            start = i
-            while i < len(debounced) and debounced[i]:
-                i += 1
-            streak = i - start
-            if streak < MIN_TOUCH_STREAK:
-                for j in range(start, i):
-                    debounced[j] = False
-        hands_touching_flags = debounced
 
         # Median smoothing to reduce jitter (window size 9)
         SMOOTH_WINDOW_RADIUS = 4  # +/- 4 frames
@@ -436,11 +396,11 @@ class PencheAnalyzer:
             ]
             smoothed_eff.append(float(np.median(window_vals)) if window_vals else None)
 
-        # Build contiguous runs of indices where hands are OFF and angle is available.
+        # Build contiguous runs of indices where angle is available.
         runs: list[list[int]] = []
         current: list[int] = []
         for i in range(len(measurements)):
-            if hands_touching_flags[i] or smoothed_eff[i] is None:
+            if smoothed_eff[i] is None:
                 if current:
                     runs.append(current)
                     current = []
@@ -465,7 +425,8 @@ class PencheAnalyzer:
                 "duration_seconds": 0.0,
                 "min_split_angle_during_hold": None,
                 "min_effective_split_angle_during_hold": None,
-                "balance_maintained_throughout": False,
+                "balance_maintained_throughout": None,
+                "balance_source": "llm_video_review",
                 "releve_maintained_majority": None,
                 "angle_stability_threshold_deg": float(ANGLE_STABILITY_DEG),
                 "hold_reference_effective_angle_deg": None,
@@ -474,134 +435,89 @@ class PencheAnalyzer:
             }
             return result
 
-        # Hold should be counted at/near the maximal split, but allow brief MediaPipe jitter.
-        # We anchor at the best hands-off peak (by smoothed effective angle), then expand while:
-        # - hands remain off the floor
-        # - angle stays within +/- 5° of the reference (ref = median of top-5 hands-off angles)
-        # - allowing up to 2 consecutive "bad" frames (jitter) before terminating expansion
-        # Consider frames "near peak" if they are within 20° of the peak effective split.
-        # This aligns with the DB validity cutoff (>=20° deviation becomes invalid).
-        NEAR_PEAK_TOLERANCE_DEG = 20.0
-        # Tolerate MediaPipe jitter spikes (frames that momentarily violate the +/-5° band).
-        # This does NOT mean the gymnast moved; it compensates for CV noise.
-        MAX_CONSEC_BAD = 20
-
-        hands_off_idxs = [
-            i for i in range(len(measurements)) if (not hands_touching_flags[i]) and (smoothed_eff[i] is not None)
-        ]
-        if not hands_off_idxs:
-            result["hold_window_1s"] = {
-                "window_start_frame": None,
-                "window_end_frame": None,
-                "duration_frames": 0,
-                "duration_seconds": 0.0,
-                "min_split_angle_during_hold": None,
-                "min_effective_split_angle_during_hold": None,
-                "balance_maintained_throughout": False,
-                "releve_maintained_majority": None,
-                "angle_stability_threshold_deg": float(ANGLE_STABILITY_DEG),
-                "hold_reference_effective_angle_deg": None,
-                "max_effective_angle_variation_within_hold_deg": None,
-                "max_missing_frame_gap": MAX_MISSING_FRAME_GAP,
-                "near_peak_tolerance_deg": float(NEAR_PEAK_TOLERANCE_DEG),
-                "peak_effective_split_angle_deg": float(peak_eff),
-                "max_consecutive_bad_frames": MAX_CONSEC_BAD,
-            }
+        # Find the best "hold" segment anywhere in the video using ONLY split-angle stability.
+        #
+        # Rules recap (your definition):
+        # - Hold timing should NOT depend on hand/balance landmarks anymore.
+        # - Angle must be "still". We treat stillness as: max(angle) - min(angle) <= 5°.
+        #
+        # We also require the segment to be near the best split in the video so we don't
+        # pick unrelated stable poses.
+        all_vals = [v for v in smoothed_eff if v is not None]
+        if not all_vals:
             return result
 
-        # Find the best "hold" segment anywhere in the video:
-        # - hands are off the floor
-        # - split stays within +/- 5° of a held reference (ref chosen per-candidate)
-        # - allow filling very short outlier holes (MediaPipe jitter)
-        HOLE_FILL_MAX = 2
+        # Robust peak reference: median of top-K angles to reduce single-frame spikes.
+        top_k = min(15, max(5, int(len(all_vals) * 0.1)))
+        peak_ref_eff = float(np.median(sorted(all_vals, reverse=True)[:top_k]))
 
-        # Build contiguous hands-off runs (break on hands-touch, missing angle, or big frame gaps)
-        runs: list[list[int]] = []
-        cur: list[int] = []
-        for idx in range(len(measurements)):
-            if hands_touching_flags[idx] or smoothed_eff[idx] is None:
-                if cur:
-                    runs.append(cur)
-                    cur = []
-                continue
-            if not cur:
-                cur = [idx]
-                continue
-            if (frames[idx] - frames[cur[-1]]) <= (1 + MAX_MISSING_FRAME_GAP):
-                cur.append(idx)
-            else:
-                runs.append(cur)
-                cur = [idx]
-        if cur:
-            runs.append(cur)
+        NEAR_PEAK_TOLERANCE_DEG = 12.0
+        near_peak_min = float(peak_ref_eff - NEAR_PEAK_TOLERANCE_DEG)
+        MAX_CONSEC_BAD = 0  # kept for schema/debug parity
 
-        # Prefer segments near the maximal split, with >=1.0s if possible.
-        PEAK_INCLUSION_TOL = 5.0  # segment must reach within 5° of global peak
-        best_valid = None  # (seg_max, duration_seconds, ref_eff, start_idx, end_idx)
-        best_fallback = None  # (seg_max, duration_seconds, ref_eff, start_idx, end_idx)
+        best_valid = None  # (dur_s, seg_min, seg_max, start_idx, end_idx)
+        best_any = None
+
+        from collections import deque
 
         for run in runs:
             vals = [float(smoothed_eff[i]) for i in run]  # no None by construction
             ts = [float(measurements[i].get("timestamp_ms") or 0.0) for i in run]
 
-            for pos in range(len(run)):
-                ref = vals[pos]
+            diffs = [ts[i] - ts[i - 1] for i in range(1, len(ts))]
+            ts_ok = any(d > 0 for d in diffs)
 
-                good = [abs(v - ref) <= ANGLE_STABILITY_DEG and v >= (peak_eff - NEAR_PEAK_TOLERANCE_DEG) for v in vals]
-                if not good[pos]:
+            maxdq: deque[tuple[float, int]] = deque()
+            mindq: deque[tuple[float, int]] = deque()
+            l = 0
+
+            for r, v in enumerate(vals):
+                while maxdq and maxdq[-1][0] < v:
+                    maxdq.pop()
+                maxdq.append((v, r))
+                while mindq and mindq[-1][0] > v:
+                    mindq.pop()
+                mindq.append((v, r))
+
+                # Shrink until constraints are met.
+                while l <= r:
+                    while maxdq and maxdq[0][1] < l:
+                        maxdq.popleft()
+                    while mindq and mindq[0][1] < l:
+                        mindq.popleft()
+
+                    if not maxdq or not mindq:
+                        break
+
+                    seg_max = maxdq[0][0]
+                    seg_min = mindq[0][0]
+                    seg_var = seg_max - seg_min
+
+                    ok = (seg_var <= ANGLE_STABILITY_DEG) and (seg_min >= near_peak_min)
+                    if ok:
+                        break
+                    l += 1
+
+                if l > r:
                     continue
 
-                # close short holes
-                closed = good[:]
-                k = 0
-                while k < len(closed):
-                    if closed[k]:
-                        k += 1
-                        continue
-                    hs = k
-                    while k < len(closed) and not closed[k]:
-                        k += 1
-                    he = k - 1
-                    if (
-                        (he - hs + 1) <= HOLE_FILL_MAX
-                        and hs - 1 >= 0
-                        and he + 1 < len(closed)
-                        and closed[hs - 1]
-                        and closed[he + 1]
-                    ):
-                        for t in range(hs, he + 1):
-                            closed[t] = True
+                if ts_ok and ts[r] > ts[l]:
+                    dur_s = (ts[r] - ts[l]) / 1000.0
+                else:
+                    dur_s = ((frames[run[r]] - frames[run[l]] + 1) / fps) if fps > 0 else 0.0
 
-                if not closed[pos]:
-                    continue
+                seg_max = maxdq[0][0] if maxdq else v
+                seg_min = mindq[0][0] if mindq else v
+                cand = (float(dur_s), float(seg_min), float(seg_max), int(run[l]), int(run[r]))
 
-                s = pos
-                while s - 1 >= 0 and closed[s - 1]:
-                    s -= 1
-                e = pos
-                while e + 1 < len(closed) and closed[e + 1]:
-                    e += 1
-
-                start_i = run[s]
-                end_i = run[e]
-                start_ms_c = ts[s]
-                end_ms_c = ts[e]
-                dur_s = (end_ms_c - start_ms_c) / 1000.0 if end_ms_c > start_ms_c else ((frames[end_i] - frames[start_i] + 1) / fps if fps > 0 else 0.0)
-
-                seg_max = float(max(vals[s : e + 1]))
-                # Must actually be near the global peak split (prevents selecting unrelated stable poses)
-                if seg_max < (peak_eff - PEAK_INCLUSION_TOL):
-                    continue
-
-                cand = (seg_max, float(dur_s), float(ref), int(start_i), int(end_i))
-                if float(dur_s) >= 1.0:
+                if cand[0] >= 1.0:
                     if best_valid is None or cand[0] > best_valid[0] or (cand[0] == best_valid[0] and cand[1] > best_valid[1]):
                         best_valid = cand
                 else:
-                    if best_fallback is None or cand[0] > best_fallback[0] or (cand[0] == best_fallback[0] and cand[1] > best_fallback[1]):
-                        best_fallback = cand
+                    if best_any is None or cand[0] > best_any[0] or (cand[0] == best_any[0] and cand[1] > best_any[1]):
+                        best_any = cand
 
-        best = best_valid if best_valid is not None else best_fallback
+        best = best_valid if best_valid is not None else best_any
 
         if best is None:
             result["hold_window_1s"] = {
@@ -611,7 +527,8 @@ class PencheAnalyzer:
                 "duration_seconds": 0.0,
                 "min_split_angle_during_hold": None,
                 "min_effective_split_angle_during_hold": None,
-                "balance_maintained_throughout": False,
+                "balance_maintained_throughout": None,
+                "balance_source": "llm_video_review",
                 "releve_maintained_majority": None,
                 "angle_stability_threshold_deg": float(ANGLE_STABILITY_DEG),
                 "hold_reference_effective_angle_deg": None,
@@ -619,10 +536,18 @@ class PencheAnalyzer:
                 "max_missing_frame_gap": MAX_MISSING_FRAME_GAP,
                 "near_peak_tolerance_deg": float(NEAR_PEAK_TOLERANCE_DEG),
                 "peak_effective_split_angle_deg": float(peak_eff),
+                "peak_reference_effective_split_angle_deg": float(peak_ref_eff),
+                "max_consecutive_bad_frames": MAX_CONSEC_BAD,
             }
             return result
 
-        _, duration_best_s, ref_eff, start_idx, end_idx = best
+        duration_best_s, seg_min_best, seg_max_best, start_idx, end_idx = best
+        seg_vals = [
+            float(smoothed_eff[i])
+            for i in range(start_idx, end_idx + 1)
+            if smoothed_eff[i] is not None
+        ]
+        ref_eff = float(np.median(seg_vals)) if seg_vals else float(seg_max_best)
 
         start_frame_num = frames[start_idx]
         end_frame_num = frames[end_idx]
@@ -639,7 +564,8 @@ class PencheAnalyzer:
                 "duration_seconds_source": "timestamp_ms",
                 "min_split_angle_during_hold": None,
                 "min_effective_split_angle_during_hold": None,
-                "balance_maintained_throughout": True,
+                "balance_maintained_throughout": None,
+                "balance_source": "llm_video_review",
                 "releve_maintained_majority": None,
                 "angle_stability_threshold_deg": float(ANGLE_STABILITY_DEG),
                 "hold_reference_effective_angle_deg": float(ref_eff),
@@ -652,12 +578,22 @@ class PencheAnalyzer:
             }
             return result
 
-        # Prefer real timestamps (ms) over fps math
+        # Prefer real timestamps (ms) over fps math.
+        # IMPORTANT: make the duration "inclusive" (end-start misses ~1 frame).
         start_ms = float(hold_segment[0].get("timestamp_ms") or 0.0)
         end_ms = float(hold_segment[-1].get("timestamp_ms") or 0.0)
-        if end_ms > start_ms:
-            duration_seconds = (end_ms - start_ms) / 1000.0
-            duration_source = "timestamp_ms"
+        dt_ms = None
+        seg_ts = [float(m.get("timestamp_ms") or 0.0) for m in hold_segment]
+        diffs = [seg_ts[i] - seg_ts[i - 1] for i in range(1, len(seg_ts))]
+        pos_diffs = [d for d in diffs if d > 0]
+        if pos_diffs:
+            dt_ms = float(np.median(pos_diffs))
+        elif fps > 0:
+            dt_ms = 1000.0 / float(fps)
+
+        if end_ms > start_ms and dt_ms is not None:
+            duration_seconds = ((end_ms - start_ms) + dt_ms) / 1000.0
+            duration_source = "timestamp_ms_inclusive"
         else:
             duration_seconds = (duration_frames / fps) if fps > 0 else 0.0
             duration_source = "fps"
@@ -682,6 +618,7 @@ class PencheAnalyzer:
             peak_i, peak_ts, peak_v = max(seg_smoothed_pairs, key=lambda t: t[2])
         else:
             peak_i, peak_ts, peak_v = start_idx, float(hold_segment[0].get("timestamp_ms") or 0.0), float("nan")
+        peak_frame_num = int(frames[peak_i]) if 0 <= int(peak_i) < len(frames) else int(start_frame_num)
 
         # 1-second window around peak (±0.5s) using timestamps
         window = [t for t in seg_smoothed_pairs if abs(t[1] - peak_ts) <= 500.0]
@@ -704,29 +641,34 @@ class PencheAnalyzer:
         # Keep legacy field name (raw), but it now reflects the smoothed effective min in the peak ±0.5s window.
         min_raw = min_eff
 
-        releve_true = sum(1 for m in hold_segment if m["measurements"]["releve_tip_toed"]["both_feet_releve"])
-        releve_maintained = releve_true >= (len(hold_segment) / 2)
-
         hold_window_stats = {
             "window_start_frame": int(start_frame_num),
             "window_end_frame": int(end_frame_num),
             "duration_frames": int(duration_frames),
             "duration_seconds": float(duration_seconds),
             "duration_seconds_source": duration_source,
+            "window_start_timestamp_ms": float(start_ms),
+            "window_end_timestamp_ms": float(end_ms),
+            # Peak identifiers (useful for LLM vision review of hand support)
+            "peak_timestamp_ms_within_hold": float(peak_ts),
+            "peak_frame_within_hold": int(peak_frame_num),
             "min_split_angle_during_hold": min_raw,
             "min_effective_split_angle_during_hold": min_eff,
             "min_effective_split_angle_observed_raw": min_eff_observed_raw,
             "min_effective_split_angle_full_segment": min_eff_full,
             "max_effective_split_angle_full_segment": max_eff_full,
             "peak_effective_angle_within_hold": float(peak_v) if peak_v == peak_v else None,
-            "balance_maintained_throughout": True,
-            "releve_maintained_majority": bool(releve_maintained),
+            "balance_maintained_throughout": None,
+            "balance_source": "llm_video_review",
+            "releve_maintained_majority": None,
+            "releve_source": "llm_video_review",
             "angle_stability_threshold_deg": float(ANGLE_STABILITY_DEG),
             "hold_reference_effective_angle_deg": float(ref_eff),
             "max_effective_angle_variation_within_hold_deg": max_variation,
             "max_missing_frame_gap": MAX_MISSING_FRAME_GAP,
             "near_peak_tolerance_deg": float(NEAR_PEAK_TOLERANCE_DEG),
             "peak_effective_split_angle_deg": float(peak_eff),
+            "peak_reference_effective_split_angle_deg": float(peak_ref_eff),
             "max_consecutive_bad_frames": MAX_CONSEC_BAD,
             "good_frames_used_for_stats": int(len(hold_segment)),
         }

@@ -5,7 +5,9 @@ load_dotenv()
 
 class Config:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash-latest")
+    # Default to a currently supported Gemini model id (the old "gemini-1.5-*-latest" aliases
+    # are not available for all API keys / API versions and can 404).
+    GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
     @classmethod
