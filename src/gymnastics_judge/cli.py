@@ -2,17 +2,43 @@ import asyncio
 import json
 import os
 import re
+from pathlib import Path
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, IntPrompt
 from rich.syntax import Syntax
 from rich.table import Table
-from .core import JudgeAgent
 from .tools.pose_analyzer import PencheAnalyzer
+from .tools.rhythmic_element_analyzer import RhythmicElementAnalyzer
 
 app = typer.Typer()
 console = Console()
+
+# Video category folders under videos/ (penche = balance; 1_2096 / 1_2105 = FIG rhythmic elements)
+VIDEO_CATEGORY_DIRS = ("videos/penche", "videos/1_2096", "videos/1_2105")
+
+
+def _ensure_video_categories():
+    """Create videos/penche, videos/1_2096, videos/1_2105 if missing (so users know where to put files)."""
+    for d in VIDEO_CATEGORY_DIRS:
+        Path(d).mkdir(parents=True, exist_ok=True)
+
+
+def _list_videos_for_tool(video_dir: str) -> list[str]:
+    """List video paths (mp4, mov) in video_dir, sorted. Returns full paths. Deduplicated (Windows globs *.mp4 and *.MP4 same files)."""
+    path = Path(video_dir)
+    if not path.exists():
+        return []
+    seen = set()
+    files = []
+    for ext in ("*.mp4", "*.MP4", "*.mov", "*.MOV"):
+        for f in path.glob(ext):
+            key = f.resolve()
+            if key not in seen:
+                seen.add(key)
+                files.append(key)
+    return sorted([str(f) for f in files], key=lambda x: os.path.basename(x).lower())
 
 
 def _format_verdict(verdict: str):
@@ -43,46 +69,50 @@ def _format_verdict(verdict: str):
 async def run_judge_system():
     console.print(Panel.fit("[bold magenta]AI Gymnastics Judge System[/bold magenta]", subtitle="Powered by Gemini 3 Flash"))
 
-    # 1. Initialize Agent & Tools
+    # 1. Initialize Tools (JudgeAgent is lazy-loaded only for Penche to avoid slow google.genai import at startup)
     try:
-        agent = JudgeAgent()
-        analyzer = PencheAnalyzer()
-        tools = {
-            "1": analyzer
-        }
+        penche = PencheAnalyzer()
+        rhythmic_1_2096 = RhythmicElementAnalyzer("1.2096")
+        rhythmic_1_2105 = RhythmicElementAnalyzer("1.2105")
+        tools = {"1": penche, "2": rhythmic_1_2096, "3": rhythmic_1_2105}
     except Exception as e:
         console.print(f"[bold red]Initialization Error:[/bold red] {e}")
         return
 
-    # 2. Select Video
-    video_dir = "videos"
-    if not os.path.exists(video_dir):
-        video_dir = "."
-    
-    mp4_files = [f for f in os.listdir(video_dir) if f.endswith(".mp4")]
-    
-    if not mp4_files:
-        console.print("[red]No .mp4 files found in 'videos' folder![/red]")
+    _ensure_video_categories()
+
+    # 2. Select Analysis Tool (then show videos for that tool)
+    console.print("\n[bold]Select Analysis Tool:[/bold]")
+    console.print("1. Penche (2.1106)")
+    console.print("2. Switch leg deer jump with ring (1.2096)")
+    console.print("3. Straddle jump with ring (1.2105)")
+    tool_choice = Prompt.ask("Select tool ID", choices=["1", "2", "3"], default="1")
+    selected_tool = tools[tool_choice]
+
+    # 3. List videos for selected tool (by category folder)
+    video_dir = getattr(selected_tool, "video_dir", "videos")
+    video_paths = _list_videos_for_tool(video_dir)
+    # Backward compat: if Penche and videos/penche is empty, list flat videos/
+    if not video_paths and video_dir == "videos/penche":
+        video_paths = _list_videos_for_tool("videos")
+    if not video_paths:
+        console.print(
+            f"[red]No videos (.mp4/.mov) found for this tool.[/red]\n"
+            f"Folder: [dim]{video_dir}[/dim]\n"
+            f"Place videos in [bold]videos/penche[/bold], [bold]videos/1_2096[/bold], or [bold]videos/1_2105[/bold] by element."
+        )
         return
 
-    table = Table(title="Available Videos")
+    table = Table(title=f"Videos — {selected_tool.name}")
     table.add_column("ID", style="cyan")
     table.add_column("Filename", style="green")
-    
-    for i, f in enumerate(mp4_files):
-        table.add_row(str(i+1), f)
-    
+    for i, p in enumerate(video_paths):
+        table.add_row(str(i + 1), os.path.basename(p))
     console.print(table)
-    
-    vid_idx = IntPrompt.ask("Select video ID", choices=[str(i+1) for i in range(len(mp4_files))])
-    selected_video = os.path.join(video_dir, mp4_files[vid_idx-1])
 
-    # 3. Select Tool (Only 1 for now, but expandable)
-    console.print("\n[bold]Select Analysis Tool:[/bold]")
-    console.print("1. Penche Analyzer (2.1106)")
-    
-    tool_choice = Prompt.ask("Select tool ID", choices=["1"], default="1")
-    selected_tool = tools[tool_choice]
+    choices = [str(i + 1) for i in range(len(video_paths))]
+    vid_idx = IntPrompt.ask("Select video ID", choices=choices)
+    selected_video = video_paths[int(vid_idx) - 1]
 
     # 4. Run Analysis
     with console.status(f"[bold green]Running {selected_tool.name}...[/bold green]"):
@@ -93,7 +123,25 @@ async def run_judge_system():
             return
 
     console.print("[green]✓ Analysis Complete[/green]")
-    
+
+    # 5. Branch: Rhythmic tools show FIG report only; Penche continues to hand/relevé/evaluate
+    is_penche = type(selected_tool).__name__ == "PencheAnalyzer"
+    if not is_penche:
+        # Rhythmic element (1.2096 / 1.2105): show FIG audit report
+        score_text = raw_data.get("score_text", "(No report generated)")
+        metrics = raw_data.get("measurements", {})
+        e_info = raw_data.get("e_deductions", {})
+        console.print(
+            f"Split: [cyan]{metrics.get('split_angle', 0):.1f}°[/cyan]  "
+            f"Ring deviation: [cyan]{metrics.get('ring_deviation_angle', 0):.1f}°[/cyan]  "
+            f"E deduction: [red]-{e_info.get('total_deduction', 0):.2f}[/red]"
+        )
+        peak_image = raw_data.get("peak_image")
+        if peak_image:
+            console.print(f"Peak frame saved: [dim]{peak_image}[/dim]")
+        console.print(Panel(score_text.strip(), title=f"FIG Audit — {selected_tool.name}", border_style="green"))
+        return
+
     if raw_data.get('peak_performance'):
         angle = raw_data['peak_performance']['measurements']['leg_split_180']['angle_between_legs_degrees']
         console.print(f"Peak Split Angle: {angle:.1f}°")
@@ -101,7 +149,9 @@ async def run_judge_system():
         console.print("[yellow]! No peak performance detected (no pose found?)[/yellow]")
         return
 
-    # 5. LLM Vision Review (Hand Support) — bypass MediaPipe hand detection
+    # 7. LLM Vision Review (Hand Support) — bypass MediaPipe hand detection
+    from .core import JudgeAgent
+    agent = JudgeAgent()
     hold_window = raw_data.get("hold_window_1s") or {}
     with console.status("[bold yellow]Reviewing hand support (Gemini vision)...[/bold yellow]"):
         try:
@@ -140,7 +190,7 @@ async def run_judge_system():
     else:
         console.print("[yellow]Hand support during hold could not be determined (LLM review).[/yellow]")
 
-    # 6. LLM Vision Review (Relevé) — bypass MediaPipe foot detection
+    # 8. LLM Vision Review (Relevé) — bypass MediaPipe foot detection
     with console.status("[bold yellow]Reviewing relevé (Gemini vision)...[/bold yellow]"):
         try:
             releve_review = await agent.review_releve(selected_video, hold_window)
@@ -170,7 +220,7 @@ async def run_judge_system():
     else:
         console.print("[yellow]Relevé could not be determined (LLM review).[/yellow]")
 
-    # 7. LLM Evaluation (Rules + CV stats + LLM hand-support + LLM relevé)
+    # 9. LLM Evaluation (Rules + CV stats + LLM hand-support + LLM relevé)
     with console.status("[bold yellow]Consulting AI Judge...[/bold yellow]"):
         # System prompt for Penche judging (D/E scoring)
         system_prompt = """
