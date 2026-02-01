@@ -1,0 +1,36 @@
+## General Notes
+1. use same format across all moves
+2. Make report understandable to the general audience
+
+## Simple Move Report (~100 words):
+1. D score (valid or not 0.0 or 5.0)
+2. E score (negative number)
+3. Stats and data/numbers/measurements
+- use words to list them out (not pure stats)
+- 得分点
+- 扣分点
+4. Final worded summary (1 sentence)
+
+## Comprehensive Report (~200 words):
+Aimed at students
+
+#### Format:
+1. Well done points (~3 sentences/points)
+2. Points for improvement (~3 sentences/point)
+3. Recommended next steps for improvement (~2-3 sentences/points)
+
+
+## Overall Person Report
+
+4变形战士 (have a graph and let AI decide the score 1-10 for each region)
+
+1/2. 4 categories:
+1 pro/con for each + comment
+
+3. overall analysis
+
+4. (~1-2 / ~100 words) paragraphs full report (don't be too flowerly/technical be general and reader friendly)
+- specific points
+- pro/cons
+- improvements
+- overall comment
