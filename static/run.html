@@ -16,13 +16,31 @@
     .media-container video, .media-container img { max-width: 100%; border-radius: 8px; }
     .report-buttons { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem; }
     .report-buttons .btn { margin-right: 0.5rem; }
+    .loading-wrapper { text-align: center; padding: 2rem; }
+    .loading-steps { max-width: 420px; margin: 0 auto; text-align: left; }
+    .loading-steps-title { font-weight: 600; margin-bottom: 1rem; color: var(--text-primary); }
+    .loading-steps-list { list-style: none; padding: 0; margin: 0 0 1rem 0; }
+    .loading-steps-list li { padding: 0.5rem 0.75rem; margin: 0.25rem 0; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; color: var(--text-muted); transition: background 0.2s, color 0.2s; }
+    .loading-steps-list li.active { background: rgba(59, 130, 246, 0.15); color: var(--accent); font-weight: 500; }
+    .loading-steps-list li.done { color: var(--success); }
+    .loading-steps-list .step-spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+    .loading-steps-list .step-done { width: 18px; text-align: center; color: var(--success); flex-shrink: 0; }
+    .loading-steps-hint { font-size: 0.85rem; color: var(--text-muted); margin-top: 1rem; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="container">
     <h1 class="page-title">分析结果</h1>
     <p class="page-subtitle" id="subtitle"></p>
-    <div id="loading" class="loading">正在分析，请稍候…（可能需要 1–2 分钟）</div>
+    <div id="loading" class="loading-wrapper">
+      <div id="loading-simple" class="loading">正在分析，请稍候…（可能需要 1–2 分钟）</div>
+      <div id="loading-steps" class="loading-steps" style="display:none;">
+        <p class="loading-steps-title">平衡腿结环 (Penche) 分析中</p>
+        <ul class="loading-steps-list" id="loading-steps-list"></ul>
+        <p class="loading-steps-hint">若已开启 MediaPipe 窗口，请在运行服务器的电脑上查看弹出窗口中的实时姿态。</p>
+      </div>
+    </div>
     <div id="error" class="error-msg" style="display:none;"></div>
     <div id="result" style="display:none;">
       <div class="card">
@@ -85,14 +103,64 @@
         }
       } catch (e) { /* fall through to run */ }
     } else {
+    var loadingEl = document.getElementById("loading");
+    var loadingSimple = document.getElementById("loading-simple");
+    var loadingSteps = document.getElementById("loading-steps");
+    var isPenche = toolId === "1";
+    var pencheSteps = [
+      "分析姿态（MediaPipe）…",
+      "审查手支撑（Gemini）…",
+      "审查 relevé（Gemini）…",
+      "AI 裁判评分…",
+      "生成简易报告…",
+      "生成综合报告…"
+    ];
+    var stepIndex = 0;
+    var stepInterval = null;
+    if (isPenche) {
+      loadingSimple.style.display = "none";
+      loadingSteps.style.display = "block";
+      var listEl = document.getElementById("loading-steps-list");
+      listEl.innerHTML = pencheSteps.map(function (text, i) {
+        return "<li id=\"step-" + i + "\"><span class=\"step-spinner\"></span>" + text + "</li>";
+      }).join("");
+      function updateStep() {
+        for (var j = 0; j < pencheSteps.length; j++) {
+          var li = document.getElementById("step-" + j);
+          if (!li) continue;
+          var icon = li.querySelector(".step-spinner, .step-done");
+          li.classList.remove("active", "done");
+          if (j < stepIndex) {
+            li.classList.add("done");
+            if (icon) { icon.className = "step-done"; icon.textContent = "✓"; }
+          } else if (j === stepIndex) {
+            li.classList.add("active");
+            if (icon) { icon.className = "step-spinner"; icon.textContent = ""; }
+          } else {
+            if (icon) { icon.className = "step-spinner"; icon.textContent = ""; }
+          }
+        }
+      }
+      stepInterval = setInterval(function () {
+        stepIndex = (stepIndex + 1) % pencheSteps.length;
+        updateStep();
+      }, 8000);
+      updateStep();
+    }
+
     fetch("/api/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool_id: toolId, video_id: parseInt(videoId, 10) })
+      body: JSON.stringify({
+        tool_id: toolId,
+        video_id: parseInt(videoId, 10),
+        show_mediapipe_window: isPenche
+      })
     })
       .then(r => r.json().then(data => ({ status: r.status, data })))
       .then(({ status, data }) => {
-        document.getElementById("loading").style.display = "none";
+        if (stepInterval) clearInterval(stepInterval);
+        loadingEl.style.display = "none";
         if (status !== 200 || data.error) {
           document.getElementById("error").style.display = "block";
           document.getElementById("error").textContent = data.error || "分析失败，请稍后重试。";
@@ -120,6 +188,7 @@
         }
       })
       .catch(err => {
+        if (stepInterval) clearInterval(stepInterval);
         document.getElementById("loading").style.display = "none";
         document.getElementById("error").style.display = "block";
         document.getElementById("error").textContent = "请求失败：" + (err.message || "请稍后重试。");

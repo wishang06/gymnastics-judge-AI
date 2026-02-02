@@ -101,12 +101,14 @@ def api_tool_videos(tool_id):
     return jsonify({"videos": items})
 
 
-def _run_pipeline_sync(tool_id: str, video_path: str) -> dict:
+def _run_pipeline_sync(tool_id: str, video_path: str, show_mediapipe_window: bool = False) -> dict:
     from .pipeline import run_single_analysis
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        return loop.run_until_complete(run_single_analysis(tool_id, video_path))
+        return loop.run_until_complete(
+            run_single_analysis(tool_id, video_path, show_mediapipe_window=show_mediapipe_window)
+        )
     finally:
         loop.close()
 
@@ -127,8 +129,9 @@ def api_run():
     if video_id < 0 or video_id >= len(files):
         return jsonify({"error": "无效的视频序号"}), 400
     video_path = str(files[video_id])
+    show_mediapipe_window = data.get("show_mediapipe_window", False) and tool_id == "1"
     try:
-        result = _run_pipeline_sync(tool_id, video_path)
+        result = _run_pipeline_sync(tool_id, video_path, show_mediapipe_window=show_mediapipe_window)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     if result.get("error"):
