@@ -139,10 +139,12 @@ async def run_single_analysis(
     tool_id: str,
     video_path: str,
     progress_callback: Optional[Callable[[str], None]] = None,
+    show_mediapipe_window: bool = False,
 ) -> Dict[str, Any]:
     """
     Run full analysis for the given tool and video. Returns dict with:
     tool_name, is_penche, video_path, peak_image_path, verdict, simple_report, comprehensive_report, error.
+    When show_mediapipe_window is True and tool is Penche, an OpenCV window with pose overlay is shown on the server.
     """
     def progress(msg: str) -> None:
         if progress_callback:
@@ -152,6 +154,8 @@ async def run_single_analysis(
     if tool_id not in tools:
         return {"error": f"Unknown tool_id: {tool_id}"}
     selected_tool = tools[tool_id]
+    if tool_id == "1" and show_mediapipe_window:
+        selected_tool = PencheAnalyzer(show_video=True)
     result = {
         "tool_name": selected_tool.name,
         "is_penche": type(selected_tool).__name__ == "PencheAnalyzer",
