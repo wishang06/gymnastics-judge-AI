@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运动员整体报告 — 选择视频</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .intro { color: var(--text-muted); margin-bottom: 1.5rem; text-align: center; }
+    .slot { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .slot .label { font-weight: 500; }
+    .slot .meta { font-size: 0.9rem; color: var(--text-muted); }
+    .slot .btn-remove { background: transparent; color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.75rem; cursor: pointer; font-size: 0.85rem; }
+    .slot .btn-remove:hover { color: var(--danger); border-color: var(--danger); }
+    .add-row { margin-top: 1rem; }
+    .add-row .btn-secondary { margin-right: 0.5rem; }
+    .picker { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem; }
+    .picker select { background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 1rem; min-width: 180px; }
+    .picker .video-list { min-width: 200px; max-height: 200px; overflow-y: auto; }
+    .picker .video-option { padding: 0.5rem; cursor: pointer; border-radius: 6px; }
+    .picker .video-option:hover { background: var(--bg-card-hover); }
+    .picker .video-option.selected { background: rgba(59, 130, 246, 0.2); color: var(--accent); }
+    #min-hint { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">运动员整体报告</h1>
+    <p class="intro">请至少选择 2 个不同动作的视频（可来自不同工具）。系统将分别分析每个视频，再生成身体难度与运动员深度分析报告（含四维度画像）。</p>
+    <div id="slots"></div>
+    <div id="picker-area"></div>
+    <div class="add-row">
+      <button type="button" class="btn btn-secondary" id="btn-add">+ 添加一项</button>
+      <span id="min-hint">至少需要 2 项</span>
+    </div>
+    <p style="margin-top: 1.5rem;">
+      <a href="#" id="btn-run" class="btn btn-primary" style="display:none;">开始整体分析</a>
+    </p>
+    <div class="nav-links" style="margin-top: 1rem;">
+      <a href="/select-tool">← 单次分析</a>
+      <a href="/">返回首页</a>
+    </div>
+  </div>
+  <script>
+    const TOOLS = [
+      { id: "1", name: "平衡腿结环 (Penche 2.1106)" },
+      { id: "2", name: "交换腿鹿跳结环 (1.2096)" },
+      { id: "3", name: "跨跳结环 (1.2105)" }
+    ];
+    const OVERALL_SELECTION_KEY = "gymnastics_overall_selection";
+    let slots = []; // { tool_id, video_id, tool_name, video_name, video_path }
+
+    function loadVideos(toolId) {
+      return fetch("/api/tools/" + toolId + "/videos").then(r => r.json()).then(d => d.videos || []);
+    }
+
+    function renderSlots() {
+      const el = document.getElementById("slots");
+      el.innerHTML = slots.map((s, i) =>
+        `<div class="slot" data-idx="${i}">
+          <div>
+            <span class="label">${s.tool_name}</span>
+            <div class="meta">${s.video_name || "未选视频"}</div>
+          </div>
+          <button type="button" class="btn-remove" data-idx="${i}">移除</button>
+        </div>`
+      ).join("");
+      document.querySelectorAll(".slot .btn-remove").forEach(btn => {
+        btn.onclick = (e) => { e.stopPropagation(); slots.splice(parseInt(btn.dataset.idx, 10), 1); document.getElementById("picker-area").innerHTML = ""; renderSlots(); saveAndUpdateRunButton(); };
+      });
+      document.querySelectorAll(".slot").forEach(slot => {
+        const idx = parseInt(slot.dataset.idx, 10);
+        slot.style.cursor = "pointer";
+        slot.onclick = (e) => { if (e.target.classList.contains("btn-remove")) return; openPicker(idx); };
+      });
+      document.getElementById("btn-run").style.display = slots.length >= 2 ? "inline-block" : "none";
+      document.getElementById("min-hint").textContent = slots.length >= 2 ? "已选 " + slots.length + " 项，可开始分析" : "至少需要 2 项";
+    }
+
+    function saveAndUpdateRunButton() {
+      try { sessionStorage.setItem(OVERALL_SELECTION_KEY, JSON.stringify(slots)); } catch (e) {}
+      renderSlots();
+    }
+
+    function addSlot() {
+      const toolId = TOOLS[0].id;
+      slots.push({ tool_id: toolId, video_id: 0, tool_name: TOOLS[0].name, video_name: null, video_path: null });
+      renderSlots();
+      openPicker(slots.length - 1);
+    }
+
+    function openPicker(idx) {
+      const s = slots[idx];
+      const toolSelect = document.createElement("select");
+      TOOLS.forEach(t => {
+        const opt = document.createElement("option");
+        opt.value = t.id;
+        opt.textContent = t.name;
+        if (t.id === s.tool_id) opt.selected = true;
+        toolSelect.appendChild(opt);
+      });
+      const videoDiv = document.createElement("div");
+      videoDiv.className = "video-list";
+      videoDiv.innerHTML = "<span class=\"meta\">加载中…</span>";
+
+      function fillVideos() {
+        loadVideos(toolSelect.value).then(videos => {
+          videoDiv.innerHTML = "";
+          if (!videos.length) {
+            videoDiv.innerHTML = "<span class=\"meta\">该分类下暂无视频</span>";
+            return;
+          }
+          videos.forEach((v, i) => {
+            const div = document.createElement("div");
+            div.className = "video-option" + (v.id === s.video_id ? " selected" : "");
+            div.textContent = v.name;
+            div.onclick = () => {
+              slots[idx] = { ...slots[idx], tool_id: toolSelect.value, video_id: v.id, tool_name: TOOLS.find(t => t.id === toolSelect.value).name, video_name: v.name };
+              videoDiv.querySelectorAll(".video-option").forEach(el => el.classList.remove("selected"));
+              div.classList.add("selected");
+              document.getElementById("picker-area").innerHTML = "";
+              renderSlots();
+              saveAndUpdateRunButton();
+            };
+            videoDiv.appendChild(div);
+          });
+        });
+      }
+
+      toolSelect.onchange = () => {
+        slots[idx].tool_id = toolSelect.value;
+        slots[idx].tool_name = TOOLS.find(t => t.id === toolSelect.value).name;
+        slots[idx].video_id = 0;
+        slots[idx].video_name = null;
+        slots[idx].video_path = null;
+        fillVideos();
+      };
+      fillVideos();
+
+      const wrap = document.createElement("div");
+      wrap.className = "picker";
+      wrap.style.marginTop = "1rem";
+      wrap.innerHTML = "<label>工具：</label>";
+      wrap.appendChild(toolSelect);
+      wrap.appendChild(document.createElement("label")).textContent = "视频：";
+      wrap.appendChild(videoDiv);
+
+      document.getElementById("picker-area").innerHTML = "";
+      document.getElementById("picker-area").appendChild(wrap);
+    }
+
+    document.getElementById("btn-add").onclick = addSlot;
+
+    document.getElementById("btn-run").onclick = function(e) {
+      e.preventDefault();
+      if (slots.length < 2) return;
+      const incomplete = slots.some(s => s.video_name == null);
+      if (incomplete) {
+        alert("请为每一项选择视频。");
+        return;
+      }
+      sessionStorage.setItem(OVERALL_SELECTION_KEY, JSON.stringify(slots));
+      location.href = "/run-overall";
+    };
+
+    const saved = sessionStorage.getItem(OVERALL_SELECTION_KEY);
+    if (saved) {
+      try {
+        const arr = JSON.parse(saved);
+        if (Array.isArray(arr) && arr.length >= 2) {
+          slots = arr;
+        }
+      } catch (e) {}
+    }
+    if (slots.length === 0) {
+      addSlot();
+      addSlot();
+      openPicker(0);
+    } else {
+      renderSlots();
+    }
+  </script>
+</body>
+</html>

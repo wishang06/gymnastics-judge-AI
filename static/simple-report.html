@@ -23,6 +23,7 @@
     <p class="page-subtitle">约 100 字：D 分、E 分、得分点/扣分点、一句话总结</p>
     <div id="no-data" class="loading" style="display:none;">暂无报告数据，请先完成一次分析。</div>
     <div id="report-panel" class="report-panel" style="display:none;">
+      <div class="score-boxes" id="score-boxes"></div>
       <div class="report-content" id="report-content"></div>
     </div>
     <div class="nav-links">
@@ -45,9 +46,40 @@
     } else {
       try {
         const data = JSON.parse(raw);
-        const text = data.simple_report || "（无简易报告内容）";
+        let text = data.simple_report || "（无简易报告内容）";
         document.getElementById("report-panel").style.display = "block";
-        document.getElementById("report-content").textContent = text;
+
+        function formatReportBody(s) {
+          return s
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .split(/\n\n+/)
+            .map(function (p) { return p.trim() ? "<p>" + p.replace(/\n/g, "<br>") + "</p>" : ""; })
+            .join("");
+        }
+
+        var dScore = null, eScore = null;
+        var dMatch = text.match(/(?:D分|难度分|DB|D-score)[：:\s]*(有效|无效|[0-5](?:\.\d+)?)/i);
+        if (dMatch) dScore = dMatch[1];
+        if (dScore === null) { dMatch = text.match(/难度分为?\s*([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
+        if (dScore === null) { dMatch = text.match(/难度分[^0-9]*([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
+        if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
+        var m = text.match(/(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－-]?\d*\.?\d+)/i);
+        if (m) eScore = m[1].replace(/－/g, "-");
+        if (eScore === null) { m = text.match(/(?:E分|E-score)[^0-9－-]*([－-]?\d*\.?\d+)/i); if (m) eScore = m[1].replace(/－/g, "-"); }
+        if (eScore === null) { m = text.match(/扣分[^0-9－-]*([－-]?\d*\.?\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+        if (eScore === null) { m = text.match(/(?:E|扣)[^\n]*?([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+        if (eScore === null) { m = text.match(/([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+
+        var boxesEl = document.getElementById("score-boxes");
+        if (dScore !== null || eScore !== null) {
+          boxesEl.innerHTML =
+            "<div class=\"score-box d-score\"><div class=\"score-label\">D 分</div><div class=\"score-value\">" + (dScore !== null ? dScore : "—") + "</div></div>" +
+            "<div class=\"score-box e-score\"><div class=\"score-label\">E 分</div><div class=\"score-value\">" + (eScore !== null ? eScore : "—") + "</div></div>";
+        } else {
+          boxesEl.style.display = "none";
+        }
+
+        document.getElementById("report-content").innerHTML = formatReportBody(text);
       } catch (e) {
         document.getElementById("no-data").style.display = "block";
       }

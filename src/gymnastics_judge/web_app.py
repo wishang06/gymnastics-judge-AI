@@ -22,8 +22,8 @@ CORS(app)
 
 TOOLS_CONFIG = [
     {"id": "1", "name": "平衡腿结环 (Penche 2.1106)", "name_en": "Penche (2.1106)"},
-    {"id": "2", "name": "交换腿鹿跳结环 (1.2096)", "name_en": "Switch leg deer jump with ring (1.2096)"},
-    {"id": "3", "name": "分腿跳结环 (1.2105)", "name_en": "Straddle jump with ring (1.2105)"},
+    {"id": "2", "name": "交换腿鹿跳结环 (1.2096)"},
+    {"id": "3", "name": "跨跳结环 (1.2105)"},
 ]
 
 VIDEO_DIRS = {"1": "videos/penche", "2": "videos/1_2096", "3": "videos/1_2105"}
@@ -77,6 +77,21 @@ def simple_report_page():
 @app.route("/comprehensive-report")
 def comprehensive_report_page():
     return send_from_directory(app.static_folder, "comprehensive-report.html")
+
+
+@app.route("/select-overall")
+def select_overall():
+    return send_from_directory(app.static_folder, "select-overall.html")
+
+
+@app.route("/run-overall")
+def run_overall_page():
+    return send_from_directory(app.static_folder, "run-overall.html")
+
+
+@app.route("/overall-report")
+def overall_report_page():
+    return send_from_directory(app.static_folder, "overall-report.html")
 
 
 @app.route("/api/tools", methods=["GET"])
@@ -165,6 +180,45 @@ def api_run():
             pass
     if result.get("peak_image_path") and not result.get("peak_image_url"):
         result["peak_image_url"] = f"/api/files/audit?p=audit_frames/{os.path.basename(peak)}"
+    return jsonify(result)
+
+
+def _resolve_video_path(tool_id: str, video_id: int) -> str | None:
+    if tool_id not in VIDEO_DIRS:
+        return None
+    files = _list_videos(VIDEO_DIRS[tool_id])
+    if tool_id == "1" and not files:
+        files = _list_videos("videos")
+    if video_id < 0 or video_id >= len(files):
+        return None
+    return str(files[video_id])
+
+
+@app.route("/api/run-overall", methods=["POST"])
+def api_run_overall():
+    data = request.get_json() or {}
+    items = data.get("items") or []
+    if len(items) < 2:
+        return jsonify({"error": "至少需要 2 个视频（可来自不同工具）"}), 400
+    resolved = []
+    for it in items:
+        tool_id = it.get("tool_id")
+        video_id = it.get("video_id")
+        if tool_id is None or video_id is None:
+            return jsonify({"error": "每项需包含 tool_id 与 video_id"}), 400
+        path = _resolve_video_path(tool_id, int(video_id))
+        if not path:
+            return jsonify({"error": f"无效的视频: tool_id={tool_id}, video_id={video_id}"}), 400
+        resolved.append((tool_id, path))
+    from .pipeline import run_overall_analysis
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(run_overall_analysis(resolved, progress_callback=None))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
     return jsonify(result)
 
 

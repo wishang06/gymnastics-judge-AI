@@ -14,7 +14,7 @@
       margin: 1rem 0;
       border-left: 4px solid #a855f7;
     }
-    .report-panel .report-content { margin: 0; line-height: 1.9; }
+    .report-panel .report-content { margin: 0; }
   </style>
 </head>
 <body>
@@ -47,7 +47,24 @@
         const data = JSON.parse(raw);
         const text = data.comprehensive_report || "（无综合报告内容）";
         document.getElementById("report-panel").style.display = "block";
-        document.getElementById("report-content").textContent = text;
+
+        function formatReportBody(s) {
+          return s
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+            .split(/\n\n+/)
+            .map(function (p) {
+              p = p.trim();
+              if (!p) return "";
+              var head = p.match(/^(\d+[.．]、?|【[^】]+】|做得好的地方|需改进处|建议下一步)[：:]\s*/);
+              if (head) {
+                p = p.slice(head[0].length);
+                return "<h3>" + head[1].replace(/[：:]\s*$/, "") + "</h3><p>" + p.replace(/\n/g, "<br>") + "</p>";
+              }
+              return "<p>" + p.replace(/\n/g, "<br>") + "</p>";
+            })
+            .join("");
+        }
+        document.getElementById("report-content").innerHTML = formatReportBody(text);
       } catch (e) {
         document.getElementById("no-data").style.display = "block";
       }

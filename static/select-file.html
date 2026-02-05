@@ -38,7 +38,7 @@
   <script>
     const params = new URLSearchParams(location.search);
     const toolId = params.get("tool") || "1";
-    const toolNames = { "1": "平衡腿结环 (Penche)", "2": "交换腿鹿跳结环 (1.2096)", "3": "分腿跳结环 (1.2105)" };
+    const toolNames = { "1": "平衡腿结环 (Penche)", "2": "交换腿鹿跳结环 (1.2096)", "3": "跨跳结环 (1.2105)" };
     document.getElementById("subtitle").textContent = "工具：" + (toolNames[toolId] || toolId);
 
     fetch("/api/tools/" + toolId + "/videos")

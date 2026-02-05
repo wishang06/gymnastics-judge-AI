@@ -91,11 +91,30 @@ body {
 }
 
 .report-content {
-  white-space: pre-wrap;
   word-wrap: break-word;
   color: var(--text-primary);
-  line-height: 1.8;
+  line-height: 1.85;
 }
+
+.report-content p { margin: 0 0 1rem 0; }
+.report-content p:last-child { margin-bottom: 0; }
+.report-content strong { color: var(--text-primary); font-weight: 600; }
+.report-content h3 { font-size: 1rem; margin: 1.25rem 0 0.5rem 0; color: var(--accent); }
+
+/* Score boxes for simple report */
+.score-boxes { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.score-box {
+  min-width: 120px;
+  padding: 0.75rem 1.25rem;
+  border-radius: 10px;
+  text-align: center;
+  border: 1px solid var(--border);
+  background: rgba(30, 41, 59, 0.6);
+}
+.score-box .score-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+.score-box .score-value { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); }
+.score-box.d-score .score-value { color: var(--accent); }
+.score-box.e-score .score-value { color: var(--danger); }
 
 .loading {
   text-align: center;
