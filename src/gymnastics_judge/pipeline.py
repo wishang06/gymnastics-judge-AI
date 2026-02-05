@@ -4,8 +4,51 @@ Used by both CLI and web app.
 """
 import asyncio
 import os
+import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+def _extract_d_e_scores(simple_report: Optional[str], verdict: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """Extract D and E score strings from simple_report and verdict for display. Returns (d_score, e_score)."""
+    text = " ".join(filter(None, [simple_report or "", verdict or ""]))
+    d_score: Optional[str] = None
+    e_score: Optional[str] = None
+    d_m = re.search(r"(?:D分|难度分|DB|D-score)[：:\s]*(有效|无效|[0-5](?:\.\d+)?)", text, re.I)
+    if d_m:
+        d_score = d_m.group(1)
+    if not d_score:
+        d_m = re.search(r"难度分为?\s*([0-5](?:\.\d+)?)", text)
+        if d_m:
+            d_score = d_m.group(1)
+    if not d_score:
+        d_m = re.search(r"难度分[^0-9]*([0-5](?:\.\d+)?)\s*分", text)
+        if d_m:
+            d_score = d_m.group(1)
+    if not d_score:
+        d_m = re.search(r"(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分", text)
+        if d_m:
+            d_score = d_m.group(1)
+    e_m = re.search(r"(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－\-]?\d*\.?\d+)", text, re.I)
+    if e_m:
+        e_score = e_m.group(1).replace("－", "-")
+    if not e_score:
+        e_m = re.search(r"(?:E分|E-score)[^0-9－\-]*([－\-]?\d*\.?\d+)", text, re.I)
+        if e_m:
+            e_score = e_m.group(1).replace("－", "-")
+    if not e_score:
+        e_m = re.search(r"扣分[^0-9－\-]*([－\-]?\d*\.?\d+)", text)
+        if e_m:
+            e_score = e_m.group(1).replace("－", "-")
+    if not e_score:
+        e_m = re.search(r"(?:E|扣)[^\n]*?([－\-]0\.\d+)", text)
+        if e_m:
+            e_score = e_m.group(1).replace("－", "-")
+    if not e_score:
+        e_m = re.search(r"([－\-]0\.\d+)", text)
+        if e_m:
+            e_score = e_m.group(1).replace("－", "-")
+    return (d_score, e_score)
 
 from .tools.pose_analyzer import PencheAnalyzer
 from .tools.rhythmic_element_analyzer import RhythmicElementAnalyzer
@@ -251,3 +294,61 @@ async def run_single_analysis(
         result["comprehensive_report"] = f"生成失败: {e}"
 
     return result
+
+
+async def run_overall_analysis(
+    items: List[tuple],
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    items: list of (tool_id, video_path) for each selected analysis.
+    Runs full analysis for each, then generates Overall Person Report (四维度画像 + 运动员深度分析).
+    Returns dict with per_element_results (list of single-run results) and overall_report (radar, athlete_profile, practice_guide, full_report, per_element).
+    """
+    def progress(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    per_element_results: List[Dict[str, Any]] = []
+    for i, (tool_id, video_path) in enumerate(items):
+        progress(f"正在分析 {i + 1}/{len(items)}: {video_path}")
+        try:
+            single = await run_single_analysis(
+                tool_id,
+                video_path,
+                progress_callback=None,
+                show_mediapipe_window=False,
+            )
+        except Exception as e:
+            single = {"error": str(e), "tool_name": f"工具 {tool_id}"}
+        d_score, e_score = _extract_d_e_scores(
+            single.get("simple_report"),
+            single.get("verdict"),
+        )
+        per_element_results.append({
+            "tool_name": single.get("tool_name", ""),
+            "verdict": single.get("verdict"),
+            "simple_report": single.get("simple_report"),
+            "comprehensive_report": single.get("comprehensive_report"),
+            "d_score": d_score,
+            "e_score": e_score,
+        })
+
+    progress("正在生成运动员整体报告…")
+    from .core import JudgeAgent
+    agent = JudgeAgent()
+    try:
+        overall_report = await agent.overall_person_report(per_element_results)
+    except Exception as e:
+        overall_report = {
+            "per_element": [],
+            "radar": {"A": 5, "B": 5, "C": 5, "D": 5},
+            "athlete_profile": f"报告生成失败: {e}",
+            "practice_guide": "",
+            "full_report": "",
+        }
+
+    return {
+        "per_element_results": per_element_results,
+        "overall_report": overall_report,
+    }

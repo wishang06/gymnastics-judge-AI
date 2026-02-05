@@ -84,8 +84,8 @@ async def run_judge_system():
     # 2. Select Analysis Tool (then show videos for that tool)
     console.print("\n[bold]Select Analysis Tool:[/bold]")
     console.print("1. Penche (2.1106)")
-    console.print("2. Switch leg deer jump with ring (1.2096)")
-    console.print("3. Straddle jump with ring (1.2105)")
+    console.print("2. 交换腿鹿跳结环 (1.2096)")
+    console.print("3. 跨跳结环 (1.2105)")
     tool_choice = Prompt.ask("Select tool ID", choices=["1", "2", "3"], default="1")
     selected_tool = tools[tool_choice]
 

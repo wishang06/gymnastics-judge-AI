@@ -10,17 +10,15 @@ from .rhythmic_mediapipe_shim.mediapipe_analyzer import MediaPipeAnalyzer
 from .rhythmic_engine import RhythmicAnalyzer, StrictRulesEngine
 
 
-# FIG element metadata (matches pdf_rule_extractor)
+# FIG element metadata (matches pdf_rule_extractor — Chinese names)
 RHYTHMIC_ELEMENTS = {
     "1.2096": {
-        "name_en": "Switch leg deer jump with ring",
-        "name_cn": "交换腿鹿跳结环",
+        "name": "交换腿鹿跳结环",
         "difficulty_value": 0.60,
         "pdf_reference": "FIG Table #9.31",
     },
     "1.2105": {
-        "name_en": "Straddle jump with ring",
-        "name_cn": "跨跳结环",
+        "name": "跨跳结环",
         "difficulty_value": 0.50,
         "pdf_reference": "FIG Table #9.29",
     },
@@ -35,9 +33,9 @@ class RhythmicElementAnalyzer:
             raise ValueError(f"Unknown rhythmic element: {action_id}. Known: {list(RHYTHMIC_ELEMENTS)}")
         self.action_id = action_id
         meta = RHYTHMIC_ELEMENTS[action_id]
-        self.name = f"{meta['name_en']} ({action_id})"
+        self.name = f"{meta['name']} ({action_id})"
         self.description = (
-            f"FIG rhythmic element {action_id}: {meta['name_en']}. "
+            f"FIG rhythmic element {action_id}: {meta['name']}. "
             f"Split & ring deviation, D/E scoring (FIG {meta['pdf_reference']}, D={meta['difficulty_value']})."
         )
         self.video_dir = os.path.join("videos", action_id.replace(".", "_"))

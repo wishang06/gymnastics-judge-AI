@@ -20,3 +20,4 @@ right now the releve recognition is very bad, implement an improvement for it
 let gemini decided whether balance is lost (hands touch ground)
 
 hands more feather region (~0.5m from the ground)
+

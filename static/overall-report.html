@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>身体难度与运动员深度分析报告 — AI 体操裁判</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    .report-section { margin-bottom: 2rem; }
+    .report-section h2 { font-size: 1.25rem; color: var(--accent); margin-bottom: 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    .element-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
+    .element-card .name { font-weight: 600; margin-bottom: 0.5rem; }
+    .element-card .scores { display: flex; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
+    .element-card .score-mini { font-size: 0.85rem; color: var(--text-muted); }
+    .element-card .score-mini .d { color: var(--accent); font-weight: 600; }
+    .element-card .score-mini .e { color: var(--danger); font-weight: 600; }
+    .element-card .pro { color: var(--success); margin: 0.25rem 0; }
+    .element-card .con { color: var(--danger); margin: 0.25rem 0; }
+    .element-card .comment { color: var(--text-muted); font-size: 0.95rem; margin-top: 0.5rem; }
+    .radar-wrap { max-width: 420px; margin: 1.5rem auto; padding: 1.5rem; background: var(--bg-card); border-radius: 12px; border: 1px solid var(--border); }
+    .radar-wrap canvas { display: block; margin: 0 auto; }
+    .report-content p { margin: 0 0 1rem 0; }
+    .report-content p:last-child { margin-bottom: 0; }
+    .report-content strong { color: var(--text-primary); font-weight: 600; }
+    .report-content .para-block { margin-bottom: 1.25rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">身体难度与运动员深度分析报告</h1>
+    <p class="page-subtitle">反馈报告形式3：四维度画像与运动员画像</p>
+    <div id="no-data" class="loading" style="display:none;">暂无整体报告数据，请先完成「运动员整体报告」流程。</div>
+    <div id="report-body" style="display:none;">
+      <section class="report-section" id="section-per-element">
+        <h2>1. 各身体难度的优点与不足</h2>
+        <div id="per-element-cards"></div>
+      </section>
+      <section class="report-section" id="section-radar">
+        <h2>2. 核心维度分析：身体难度 (DB) 四维度画像</h2>
+        <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1rem;">
+          A 姿态/柔韧性 · B 动力性/爆发力 · C 技术规范 · D 稳定性（轴心/重心）
+        </p>
+        <div class="radar-wrap">
+          <canvas id="radar-chart" width="360" height="360"></canvas>
+        </div>
+      </section>
+      <section class="report-section" id="section-profile">
+        <h2>3. 运动员画像：优势与劣势</h2>
+        <div class="report-content" id="athlete-profile"></div>
+      </section>
+      <section class="report-section" id="section-guide">
+        <h2>4. 练习建议与训练指南</h2>
+        <div class="report-content" id="practice-guide"></div>
+      </section>
+      <section class="report-section" id="section-full">
+        <h2>5. 总体报告</h2>
+        <div class="report-content" id="full-report"></div>
+      </section>
+    </div>
+    <div class="nav-links">
+      <a href="/select-overall">← 再做一次整体报告</a>
+      <a href="/select-tool">单次动作分析</a>
+      <a href="/">返回首页</a>
+    </div>
+  </div>
+  <script>
+    const OVERALL_RESULT_KEY = "gymnastics_overall_result";
+    const raw = sessionStorage.getItem(OVERALL_RESULT_KEY);
+    if (!raw) {
+      document.getElementById("no-data").style.display = "block";
+    } else {
+      try {
+        const data = JSON.parse(raw);
+        const report = data.overall_report || {};
+        document.getElementById("report-body").style.display = "block";
+
+        var perEl = report.per_element || [];
+        var perResults = data.per_element_results || [];
+        var cardsEl = document.getElementById("per-element-cards");
+        cardsEl.innerHTML = perEl.map(function (e, i) {
+          var res = perResults[i] || {};
+          var d = res.d_score != null ? res.d_score : "—";
+          var eVal = res.e_score != null ? res.e_score : "—";
+          var scoreBlock = (d !== "—" || eVal !== "—") ?
+            "<div class=\"scores\"><span class=\"score-mini\">D <span class=\"d\">" + d + "</span></span> <span class=\"score-mini\">E <span class=\"e\">" + eVal + "</span></span></div>" : "";
+          return "<div class=\"element-card\">" +
+            "<div class=\"name\">" + (e.element_name || "") + "</div>" +
+            scoreBlock +
+            "<div class=\"pro\">优点： " + (e.pro || "—") + "</div>" +
+            "<div class=\"con\">不足： " + (e.con || "—") + "</div>" +
+            "<div class=\"comment\">" + (e.comment || "") + "</div>" +
+            "</div>";
+        }).join("");
+
+        var radar = report.radar || { A: 5, B: 5, C: 5, D: 5 };
+        var labels = ["姿态与柔韧性 (A)", "动力性与爆发力 (B)", "技术规范 (C)", "稳定性 (D)"];
+        var values = [
+          Math.max(1, Math.min(10, radar.A)),
+          Math.max(1, Math.min(10, radar.B)),
+          Math.max(1, Math.min(10, radar.C)),
+          Math.max(1, Math.min(10, radar.D))
+        ];
+        var ctx = document.getElementById("radar-chart").getContext("2d");
+        var gridColor = "rgba(148, 163, 184, 0.35)";
+        var tickColor = "rgba(241, 245, 249, 0.9)";
+        new Chart(ctx, {
+          type: "radar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "身体难度维度",
+              data: values,
+              fill: true,
+              backgroundColor: "rgba(59, 130, 246, 0.2)",
+              borderColor: "rgba(59, 130, 246, 0.95)",
+              borderWidth: 2,
+              pointBackgroundColor: "rgba(59, 130, 246, 1)",
+              pointBorderColor: "#fff",
+              pointBorderWidth: 2,
+              pointRadius: 5,
+              pointHoverBackgroundColor: "#fff",
+              pointHoverBorderColor: "rgba(59, 130, 246, 1)"
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            layout: { padding: 20 },
+            scales: {
+              r: {
+                min: 0,
+                max: 10,
+                beginAtZero: true,
+                ticks: {
+                  stepSize: 2,
+                  font: { size: 13 },
+                  color: tickColor,
+                  backdropColor: "transparent",
+                  z: 1
+                },
+                pointLabels: {
+                  font: { size: 13 },
+                  color: tickColor,
+                  padding: 8
+                },
+                angleLines: {
+                  display: true,
+                  color: gridColor,
+                  lineWidth: 1
+                },
+                grid: {
+                  color: gridColor,
+                  circular: true,
+                  lineWidth: 1
+                }
+              }
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) { return ctx.label + "： " + ctx.raw + " 分"; }
+                }
+              }
+            }
+          }
+        });
+
+        function formatParagraphs(s) {
+          if (!s || !s.trim()) return "<p>—</p>";
+          var text = s.trim();
+          var out = [];
+          var blocks = text.split(/\n\n+/);
+          blocks.forEach(function(block) {
+            block = block.trim();
+            if (!block) return;
+            if (block.length > 100 && /[。！？]/.test(block)) {
+              var sentences = block.match(/[^。！？]+[。！？]?/g) || [];
+              sentences.forEach(function(part) {
+                part = part.trim();
+                if (part) out.push("<p class=\"para-block\">" + part.replace(/\n/g, "<br>") + "</p>");
+              });
+            } else {
+              out.push("<p class=\"para-block\">" + block.replace(/\n/g, "<br>") + "</p>");
+            }
+          });
+          return out.length ? out.join("") : "<p>—</p>";
+        }
+        document.getElementById("athlete-profile").innerHTML = formatParagraphs(report.athlete_profile || "");
+        document.getElementById("practice-guide").innerHTML = formatParagraphs(report.practice_guide || "");
+        document.getElementById("full-report").innerHTML = formatParagraphs(report.full_report || "");
+      } catch (e) {
+        document.getElementById("no-data").style.display = "block";
+        document.getElementById("no-data").textContent = "报告数据解析失败。";
+      }
+    }
+  </script>
+</body>
+</html>

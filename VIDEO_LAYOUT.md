@@ -5,8 +5,8 @@ All videos live under **`videos/`** in this project, in subfolders by element:
 | Folder           | Tool / element                               | Example filenames        |
 |------------------|----------------------------------------------|--------------------------|
 | `videos/penche/` | Penche (2.1106) — balance, hold, relevé      | `bad-1.mp4`, `Perfect-1.mp4` |
-| `videos/1_2096/` | Switch leg deer jump with ring (1.2096), FIG 9.31 | `12096_test_01.mp4`, `12096_test_02.mp4` |
-| `videos/1_2105/` | Straddle jump with ring (1.2105), FIG 9.29   | `12105_test_01.mp4`, `12105_test_02.mp4` |
+| `videos/1_2096/` | 交换腿鹿跳结环 (1.2096), FIG 9.31 | `12096_test_01.mp4`, `12096_test_02.mp4` |
+| `videos/1_2105/` | 跨跳结环 (1.2105), FIG 9.29   | `12105_test_01.mp4`, `12105_test_02.mp4` |
 
 - **Penche**: put existing penche `.mp4` files in `videos/penche/`. If that folder is empty, the app also looks in `videos/` for backward compatibility.
 - **Rhythmic (1.2096 / 1.2105)**: filenames must match the element code (e.g. `12096_*.mp4` for 1.2096, `12105_*.mp4` for 1.2105). Put them in `videos/1_2096/` and `videos/1_2105/` respectively.

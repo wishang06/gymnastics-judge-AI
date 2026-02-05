@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>运动员整体报告 — 分析中</title>
+  <link rel="stylesheet" href="/styles/common.css">
+  <style>
+    .loading-wrapper { text-align: center; padding: 2rem; }
+    .loading-steps { max-width: 420px; margin: 0 auto; text-align: left; }
+    .loading-steps-title { font-weight: 600; margin-bottom: 1rem; color: var(--text-primary); }
+    .loading-steps-list { list-style: none; padding: 0; margin: 0 0 1rem 0; }
+    .loading-steps-list li { padding: 0.5rem 0.75rem; margin: 0.25rem 0; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; color: var(--text-muted); }
+    .loading-steps-list li.active { background: rgba(59, 130, 246, 0.15); color: var(--accent); font-weight: 500; }
+    .loading-steps-list li.done { color: var(--success); }
+    .step-spinner { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+    .step-done { width: 18px; text-align: center; color: var(--success); flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="page-title">运动员整体报告</h1>
+    <p class="page-subtitle" id="subtitle">正在依次分析各视频并生成整体报告…</p>
+    <div id="loading" class="loading-wrapper">
+      <div id="loading-steps" class="loading-steps">
+        <p class="loading-steps-title" id="step-title">准备中…</p>
+        <ul class="loading-steps-list" id="loading-steps-list"></ul>
+      </div>
+    </div>
+    <div id="error" class="error-msg" style="display:none;"></div>
+    <div class="nav-links" style="margin-top:1.5rem;">
+      <a href="/select-overall">← 重新选择视频</a>
+    </div>
+  </div>
+  <script>
+    const OVERALL_SELECTION_KEY = "gymnastics_overall_selection";
+    const OVERALL_RESULT_KEY = "gymnastics_overall_result";
+    const selection = JSON.parse(sessionStorage.getItem(OVERALL_SELECTION_KEY) || "[]");
+    if (selection.length < 2) {
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("error").style.display = "block";
+      document.getElementById("error").textContent = "请先选择至少 2 个视频。";
+      document.getElementById("error").innerHTML += ' <a href="/select-overall">去选择</a>';
+    } else {
+      const total = selection.length;
+      const stepTitle = document.getElementById("step-title");
+      const listEl = document.getElementById("loading-steps-list");
+      listEl.innerHTML = selection.map(function (s, i) {
+        return "<li id=\"step-" + i + "\"><span class=\"step-spinner\"></span>" + (i + 1) + ". " + s.tool_name + " — " + (s.video_name || "视频") + "</li>";
+      }).join("");
+      listEl.innerHTML += "<li id=\"step-report\"><span class=\"step-spinner\"></span>生成运动员整体报告（四维度画像）…</li>";
+      stepTitle.textContent = "正在分析 0/" + total + " …";
+
+      var currentStep = 0;
+      function setStep(index, done) {
+        for (var i = 0; i <= total; i++) {
+          var li = document.getElementById("step-" + (i < total ? i : "report"));
+          if (!li) continue;
+          var icon = li.querySelector(".step-spinner, .step-done");
+          li.classList.remove("active", "done");
+          if (i < index || (i === index && done)) {
+            li.classList.add("done");
+            if (icon) { icon.className = "step-done"; icon.textContent = "✓"; }
+          } else if (i === index) {
+            li.classList.add("active");
+            if (icon) { icon.className = "step-spinner"; icon.textContent = ""; }
+          } else {
+            if (icon) { icon.className = "step-spinner"; icon.textContent = ""; }
+          }
+        }
+        if (index < total) {
+          stepTitle.textContent = "正在分析 " + (index + 1) + "/" + total + " …";
+        } else {
+          stepTitle.textContent = "正在生成运动员整体报告…";
+        }
+      }
+      setStep(0, false);
+
+      const items = selection.map(function (s) { return { tool_id: s.tool_id, video_id: s.video_id }; });
+      fetch("/api/run-overall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: items })
+      })
+        .then(function (r) { return r.json().then(function (data) { return { status: r.status, data: data }; }); })
+        .then(function (res) {
+          clearInterval(stepInterval);
+          setStep(total, true);
+          document.getElementById("loading").style.display = "none";
+          if (res.status !== 200 || res.data.error) {
+            document.getElementById("error").style.display = "block";
+            document.getElementById("error").textContent = res.data.error || "整体分析失败，请稍后重试。";
+            return;
+          }
+          sessionStorage.setItem(OVERALL_RESULT_KEY, JSON.stringify(res.data));
+          location.href = "/overall-report";
+        })
+        .catch(function (err) {
+          clearInterval(stepInterval);
+          setStep(currentStep, false);
+          document.getElementById("loading").style.display = "none";
+          document.getElementById("error").style.display = "block";
+          document.getElementById("error").textContent = "请求失败：" + (err.message || "请稍后重试。");
+        });
+
+      var stepInterval = setInterval(function () {
+        if (currentStep < total) {
+          currentStep++;
+          setStep(currentStep, false);
+        }
+        if (currentStep >= total) clearInterval(stepInterval);
+      }, 15000);
+    }
+  </script>
+</body>
+</html>

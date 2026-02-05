@@ -688,6 +688,7 @@ class JudgeAgent:
         import json
         data_blob = json.dumps(tool_output, indent=2, ensure_ascii=False)
         verdict_blob = f"\n\n裁判详细结论（供参考）：\n{judge_verdict}" if judge_verdict else ""
+        # IMPROVE THIS PROMPT TO BE MORE CONCISE AND TO THE POINT
         prompt = f"""你是一位体操教练/裁判。请根据以下技术数据与裁判结论，用中文写一份「综合报告」（约200字），面向学生/运动员。
 
 动作/工具名称：{tool_name}
@@ -703,3 +704,123 @@ class JudgeAgent:
 
 请直接输出中文综合报告，不要输出 JSON 或代码块。"""
         return await self._generate_content(prompt)
+
+    async def overall_person_report(
+        self,
+        per_element_results: list,
+    ) -> dict:
+        """
+        Generate 反馈报告形式3：身体难度与运动员深度分析报告.
+        per_element_results: list of dicts with keys tool_name, verdict (optional), simple_report, comprehensive_report.
+        Returns dict with: per_element (pro/con/comment per element), radar (A,B,C,D 1-10), athlete_profile, practice_guide, full_report.
+        """
+        import json
+        from google.genai import types
+
+        elements_blob = json.dumps(
+            [
+                {
+                    "tool_name": r.get("tool_name", ""),
+                    "verdict": r.get("verdict"),
+                    "simple_report": r.get("simple_report"),
+                    "comprehensive_report": r.get("comprehensive_report"),
+                }
+                for r in per_element_results
+            ],
+            indent=2,
+            ensure_ascii=False,
+        )
+
+        prompt = """你是一位艺术体操/体操裁判与教练。请根据以下「多个身体难度」的单独分析结果，生成一份「身体难度与运动员深度分析报告」（反馈报告形式3）。
+
+## 输入
+每个身体难度（平衡/跳跃/转体等）已有：简易报告、综合报告，以及可能有的裁判结论。请据此综合写出整体报告。
+
+## 你必须输出的 JSON 结构（严格按此字段名）
+
+1. **per_element**：数组，与输入顺序一致。每项包含：
+   - element_name: 该动作中文名（与 tool_name 对应）
+   - pro: 该动作的一个优点（一句话）
+   - con: 该动作的一个不足（一句话）
+   - comment: 一句简短总评
+
+2. **radar**：四维度画像，每项 1–10 分（整数）。根据各动作表现由你综合判断：
+   - A: 姿态与柔韧性 (Aesthetics & Amplitude) — 形态幅度、开度、柔韧
+   - B: 动力性与爆发力 (The Engine) — 滞空感、速度感、弹跳
+   - C: 技术规范 (Cleanliness) — 基本功、立踵、膝盖、脚背等细节
+   - D: 稳定性 (Axis & Centering) — 轴心、重心、平衡、有无跑位/歪斜
+
+3. **athlete_profile**：一段话，运动员画像：优势与劣势（中文）。
+
+4. **practice_guide**：一段话，练习建议与训练指南（中文）。
+
+5. **full_report**：1～2 段、约 100 字的全文总结（中文），包含：具体要点、优缺点、改进方向、总体评价。语言通俗，面向家长/学生。
+
+请仅输出合法 JSON，不要输出 markdown 代码块或其它前后文字。"""
+
+        full_prompt = f"{prompt}\n\n## 各动作分析结果\n{elements_blob}"
+
+        schema = {
+            "type": "OBJECT",
+            "required": ["per_element", "radar", "athlete_profile", "practice_guide", "full_report"],
+            "properties": {
+                "per_element": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "required": ["element_name", "pro", "con", "comment"],
+                        "properties": {
+                            "element_name": {"type": "STRING"},
+                            "pro": {"type": "STRING"},
+                            "con": {"type": "STRING"},
+                            "comment": {"type": "STRING"},
+                        },
+                    },
+                },
+                "radar": {
+                    "type": "OBJECT",
+                    "required": ["A", "B", "C", "D"],
+                    "properties": {
+                        "A": {"type": "INTEGER", "description": "1-10"},
+                        "B": {"type": "INTEGER", "description": "1-10"},
+                        "C": {"type": "INTEGER", "description": "1-10"},
+                        "D": {"type": "INTEGER", "description": "1-10"},
+                    },
+                },
+                "athlete_profile": {"type": "STRING"},
+                "practice_guide": {"type": "STRING"},
+                "full_report": {"type": "STRING"},
+            },
+        }
+
+        model_names = self._model_names_to_try()
+        last_error = None
+        for model_name in model_names:
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=model_name,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.3,
+                        response_mime_type="application/json",
+                        response_schema=schema,
+                    ),
+                )
+                parsed = getattr(response, "parsed", None)
+                if parsed is None:
+                    parsed = json.loads(response.text or "{}")
+                # Clamp radar to 1-10
+                r = parsed.get("radar") or {}
+                for k in ("A", "B", "C", "D"):
+                    if k in r and isinstance(r[k], (int, float)):
+                        r[k] = max(1, min(10, int(r[k])))
+                parsed["radar"] = r
+                return parsed
+            except Exception as e:
+                last_error = e
+                if "404" not in str(e) and "not found" not in str(e).lower():
+                    raise
+                continue
+        raise RuntimeError(
+            f"Could not generate overall report. Last error: {last_error}"
+        ) from last_error
