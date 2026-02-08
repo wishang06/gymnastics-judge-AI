@@ -22,9 +22,10 @@ TURN_ELEMENT = {
 class TurnAnalyzer:
     """Analyzer for Back Attitude Pivot (3.1203) using YOLOv8-Pose."""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, show_video: bool = False):
         self._processor: MovementProcessor | None = None
         self.verbose = verbose
+        self.show_video = show_video
         self.name = f"{TURN_ELEMENT['name']} ({TURN_ELEMENT['code']})"
         self.description = (
             f"FIG turn element {TURN_ELEMENT['code']}: {TURN_ELEMENT['name']}. "
@@ -34,7 +35,9 @@ class TurnAnalyzer:
 
     def _ensure_processor(self) -> MovementProcessor:
         if self._processor is None:
-            self._processor = MovementProcessor(verbose=self.verbose)
+            self._processor = MovementProcessor(
+                verbose=self.verbose, show_video=self.show_video
+            )
         return self._processor
 
     async def analyze(self, video_path: str) -> Dict[str, Any]:

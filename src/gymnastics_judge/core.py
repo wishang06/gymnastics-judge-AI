@@ -686,6 +686,56 @@ class JudgeAgent:
                 cap.release()
         return parts
 
+    def _sample_overall_report_frames(
+        self,
+        video_paths: List[str],
+        max_frames_per_video: int = 3,
+        max_total_frames: int = 15,
+    ) -> List[types.Part]:
+        """
+        Sample key frames from each video for the overall person report.
+        Returns list of Parts: for each video, a short text label then that video's image Parts.
+        """
+        parts: List[types.Part] = []
+        total = 0
+        try:
+            import cv2
+        except Exception:
+            return parts
+        per_video = min(max_frames_per_video, max(1, max_total_frames // max(1, len(video_paths))))
+        for idx, video_path in enumerate(video_paths):
+            if total >= max_total_frames:
+                break
+            if not video_path or not os.path.isfile(video_path):
+                continue
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                continue
+            try:
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                need = min(per_video, max_total_frames - total)
+                if need <= 0 or total_frames <= 0:
+                    continue
+                parts.append(types.Part.from_text(text=f"【动作 {idx + 1} 关键帧】"))
+                step = max(1, total_frames // (need + 1))
+                for i in range(need):
+                    frame_idx = min(i * step, total_frames - 1)
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_idx))
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    h, w = frame.shape[:2]
+                    if w > 960:
+                        scale = 960 / float(w)
+                        frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+                    if ok:
+                        parts.append(types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg"))
+                        total += 1
+            finally:
+                cap.release()
+        return parts
+
     async def _generate_content(self, user_prompt: str) -> str:
         """Call Gemini with retry over model names. Returns response.text."""
         model_names_to_try = self._model_names_to_try()
@@ -771,7 +821,7 @@ Output Format (严格遵守以下顺序及逻辑):
 - D分：判定 (有效/无效)，得分 (数值)
 - E分：总扣分 (数值)
 3. 得分点（D）与扣分点（E） (数据驱动闭环)
-- 要求：每一项得分与扣分点，必须采用 (专业结论) + (核心实测数据) -> (分值影响) 的三段论模式，通过实测数据进行对照打分。
+- 要求：每一项得分与扣分点，必须采用 (专业结论) + (核心实测数据) -> (分值影响) 的三段论模式，通过实测数据进行对照打分。(但不要显示出具体的核心数据，只显示结论和最后的打分)
 4. 总结：
 - 要求：1-2句话简短总结该次动作表现，请基于得分（D）与失分（E）情况进行梯队等级评价——需进步/已达标/表现佳/很完美
 （示例：本次动作技术规范，表现佳）
@@ -810,7 +860,7 @@ Output Format (严格遵守以下顺序及逻辑):
 [Output Principles]:
 - 数据优先原则：始终以 JSON 格式的 Computed Metrics 实测数据作为判定的事实准则；严禁凭多模态视觉直觉推翻、修正或得出任何与实测数据相悖的结论。
 - 观察任务：请开启多模态审计权限，在参考数据的同时深度观察视频，作为判定的视觉辅助。
-- 数据驱动：分析必须与实测数据（如180度开度、定格秒数、结环角度）形成强闭环。
+- 数据驱动：分析必须与实测数据（如180度开度、定格秒数、结环角度）形成强闭环。(但不要显示出具体的核心数据，只显示结论和最后的打分)
 
 Output Format（严格遵守，勿用 markdown 表格）：
 - 请用**分点叙述**（小标题 + 短段落或 bullet），不要使用 markdown 表格（禁止使用 | 分隔符），不要在行末或句中加 |。
@@ -850,10 +900,12 @@ Output Format（严格遵守，勿用 markdown 表格）：
     async def overall_person_report(
         self,
         per_element_results: list,
+        video_paths: Optional[List[str]] = None,
     ) -> dict:
         """
         Generate 反馈报告形式3：身体难度与运动员深度分析报告.
         per_element_results: list of dicts with keys tool_name, verdict (optional), simple_report, comprehensive_report.
+        video_paths: optional list of video file paths (same order as per_element_results); when provided, key frames are sent so the LLM can use vision in addition to the text data.
         Returns dict with: per_element (pro/con/comment per element), radar (A,B,C,D 1-10), athlete_profile, practice_guide, full_report.
         """
         import json
@@ -915,6 +967,15 @@ Output format（必须输出的 JSON 结构）：
 请仅输出合法 JSON，不要输出 markdown 代码块或其它前后文字。"""
 
         full_prompt = f"{prompt}\n\n## 各动作分析结果\n{elements_blob}"
+        if video_paths and len(video_paths) == len(per_element_results):
+            full_prompt += "\n\n下方附有各动作的关键帧（与上面输入顺序一致：动作1、动作2…），供你结合视觉观察完善四维画像与运动员画像。结论仍以数据为主要依据，视觉作为辅助。"
+        frame_parts: List[types.Part] = []
+        if video_paths and len(video_paths) == len(per_element_results):
+            frame_parts = self._sample_overall_report_frames(
+                video_paths,
+                max_frames_per_video=3,
+                max_total_frames=15,
+            )
 
         schema = {
             "type": "OBJECT",
@@ -949,13 +1010,16 @@ Output format（必须输出的 JSON 结构）：
             },
         }
 
-        model_names = self._model_names_to_try()
+        contents: List[types.Part] = [types.Part.from_text(text=full_prompt)]
+        if frame_parts:
+            contents.extend(frame_parts)
+        model_try_order = ["gemini-2.5-pro", "gemini-2.5-flash", *self._model_names_to_try()]
         last_error = None
-        for model_name in model_names:
+        for model_name in model_try_order:
             try:
                 response = await self.client.aio.models.generate_content(
                     model=model_name,
-                    contents=full_prompt,
+                    contents=contents,
                     config=types.GenerateContentConfig(
                         temperature=0.3,
                         response_mime_type="application/json",
@@ -965,7 +1029,6 @@ Output format（必须输出的 JSON 结构）：
                 parsed = getattr(response, "parsed", None)
                 if parsed is None:
                     parsed = json.loads(response.text or "{}")
-                # Clamp radar to 1-10
                 r = parsed.get("radar") or {}
                 for k in ("A", "B", "C", "D"):
                     if k in r and isinstance(r[k], (int, float)):

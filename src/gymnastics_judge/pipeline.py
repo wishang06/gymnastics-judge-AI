@@ -16,7 +16,11 @@ def _extract_d_e_scores(simple_report: Optional[str], verdict: Optional[str]) ->
     e_score: Optional[str] = None
     d_m = re.search(r"(?:D分|难度分|DB|D-score)[：:\s]*(有效|无效|[0-5](?:\.\d+)?)", text, re.I)
     if d_m:
-        d_score = d_m.group(1)
+        d_score = d_m.group(1).strip()
+        if d_score in ("无效", "有效"):
+            # Prefer numeric "得分 (X.X)" when present; otherwise use 0.0 for 无效
+            num_m = re.search(r"得分\s*[（(]?\s*([0-5](?:\.\d+)?)\s*[）)]?", text)
+            d_score = num_m.group(1) if num_m else ("0.0" if d_score == "无效" else d_score)
     if not d_score:
         d_m = re.search(r"难度分为?\s*([0-5](?:\.\d+)?)", text)
         if d_m:
@@ -185,11 +189,13 @@ async def run_single_analysis(
     video_path: str,
     progress_callback: Optional[Callable[[str], None]] = None,
     show_mediapipe_window: bool = False,
+    show_yolo_window: bool = False,
 ) -> Dict[str, Any]:
     """
     Run full analysis for the given tool and video. Returns dict with:
     tool_name, is_penche, video_path, peak_image_path, verdict, simple_report, comprehensive_report, error.
     When show_mediapipe_window is True and tool is Penche, an OpenCV window with pose overlay is shown on the server.
+    When show_yolo_window is True and tool is turn (4), an OpenCV window with YOLO overlay is shown on the server.
     """
     def progress(msg: str) -> None:
         if progress_callback:
@@ -201,6 +207,8 @@ async def run_single_analysis(
     selected_tool = tools[tool_id]
     if tool_id == "1" and show_mediapipe_window:
         selected_tool = PencheAnalyzer(show_video=True)
+    if tool_id == "4" and show_yolo_window:
+        selected_tool = TurnAnalyzer(verbose=False, show_video=True)
     result = {
         "tool_name": selected_tool.name,
         "is_penche": type(selected_tool).__name__ == "PencheAnalyzer",
@@ -222,10 +230,16 @@ async def run_single_analysis(
     if not result["is_penche"]:
         result["peak_image_path"] = raw_data.get("peak_image")
         result["verdict"] = raw_data.get("verdict")
-        if raw_data.get("d_score") is not None:
-            result["d_score"] = str(raw_data["d_score"])
-        if raw_data.get("e_deduction") is not None:
-            result["e_score"] = f"-{raw_data['e_deduction']:.2f}"
+        # D score: turn uses "d_score", rhythmic uses "difficulty_score"
+        d_val = raw_data.get("d_score") if raw_data.get("d_score") is not None else raw_data.get("difficulty_score")
+        if d_val is not None:
+            result["d_score"] = str(d_val)
+        # E score: turn uses "e_deduction", rhythmic uses e_deductions["total_deduction"]
+        e_ded = raw_data.get("e_deduction")
+        if e_ded is None and isinstance(raw_data.get("e_deductions"), dict):
+            e_ded = raw_data["e_deductions"].get("total_deduction")
+        if e_ded is not None:
+            result["e_score"] = f"-{float(e_ded):.2f}"
         from .core import JudgeAgent
         agent = JudgeAgent()
         progress("生成简易动作报告…")
@@ -314,6 +328,11 @@ async def run_single_analysis(
     except Exception as e:
         result["comprehensive_report"] = f"生成失败: {e}"
 
+    d_score, e_score = _extract_d_e_scores(result.get("simple_report"), result.get("verdict"))
+    if d_score is not None:
+        result["d_score"] = d_score
+    if e_score is not None:
+        result["e_score"] = e_score
     return result
 
 
@@ -358,8 +377,9 @@ async def run_overall_analysis(
     progress("正在生成运动员整体报告…")
     from .core import JudgeAgent
     agent = JudgeAgent()
+    video_paths = [video_path for (_, video_path) in items]
     try:
-        overall_report = await agent.overall_person_report(per_element_results)
+        overall_report = await agent.overall_person_report(per_element_results, video_paths=video_paths)
     except Exception as e:
         overall_report = {
             "per_element": [],

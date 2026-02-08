@@ -14,8 +14,8 @@ An AI-powered system for judging gymnastics elements from video: balance (Penche
   - **综合报告** — Longer report with strengths, improvements, and next steps (optionally with video frames).
   - **运动员整体报告** — Multi-video: per-element summary + 4-dimension radar (姿态/柔韧性, 动力性, 技术规范, 稳定性) + athlete profile and practice guide.
 - **Interfaces**
-  - **CLI** ? Tool and video selection, FIG audit output, simple & comprehensive reports.
-  - **Web app** ? Chinese UI: choose tool ? video ? run ? view reports; optional overall report from 2+ videos.
+  - **CLI** - Tool and video selection, FIG audit output, simple & comprehensive reports.
+  - **Web app** - Chinese UI: choose tool ? video ? run ? view reports; optional overall report from 2+ videos.
 
 ## Requirements
 

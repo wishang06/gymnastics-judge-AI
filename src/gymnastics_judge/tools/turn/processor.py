@@ -12,8 +12,9 @@ from .geometry import calculate_azimuth
 
 
 class MovementProcessor:
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, show_video: bool = False):
         self.verbose = verbose
+        self.show_video = show_video
         model_path = config.AI_CONFIG["MODEL_PATH"]
         if self.verbose:
             print(f"Loading YOLOv8-Pose: {model_path} ...")
@@ -147,6 +148,11 @@ class MovementProcessor:
                     if out:
                         res_plotted = results[0].plot()
                         out.write(res_plotted)
+                    if self.show_video:
+                        res_plotted = results[0].plot()
+                        cv2.imshow("YOLO 后屈腿转体 (3.1203)", res_plotted)
+                        if cv2.waitKey(1) & 0xFF == ord("q"):
+                            break
 
             if not detected_this_frame and rotation_direction != 0:
                 cumulative_rotation += current_velocity
@@ -157,9 +163,15 @@ class MovementProcessor:
             extracted_data.append(frame_data)
             if out and not detected_this_frame:
                 out.write(frame)
+            if self.show_video and not detected_this_frame:
+                cv2.imshow("YOLO 后屈腿转体 (3.1203)", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
             frame_idx += 1
 
         cap.release()
         if out:
             out.release()
+        if self.show_video:
+            cv2.destroyAllWindows()
         return extracted_data

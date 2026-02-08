@@ -36,9 +36,9 @@
     <div id="loading" class="loading-wrapper">
       <div id="loading-simple" class="loading">正在分析，请稍候…（可能需要 1–2 分钟）</div>
       <div id="loading-steps" class="loading-steps" style="display:none;">
-        <p class="loading-steps-title">平衡腿结环 (Penche) 分析中</p>
+        <p class="loading-steps-title" id="loading-steps-title"></p>
         <ul class="loading-steps-list" id="loading-steps-list"></ul>
-        <p class="loading-steps-hint">若已开启 MediaPipe 窗口，请在运行服务器的电脑上查看弹出窗口中的实时姿态。</p>
+        <p class="loading-steps-hint" id="loading-steps-hint" style="display:none;"></p>
       </div>
     </div>
     <div id="error" class="error-msg" style="display:none;"></div>
@@ -115,17 +115,44 @@
       "生成简易报告…",
       "生成综合报告…"
     ];
+    var rhythmicSteps = [
+      "分析姿态（MediaPipe）…",
+      "生成简易动作报告…",
+      "生成综合报告…"
+    ];
+    var turnSteps = [
+      "提取姿态与旋转（YOLO）…",
+      "计算 D/E 评分…",
+      "生成简易动作报告…",
+      "生成综合报告…"
+    ];
+    var stepConfig = {
+      "1": { title: "平衡腿结环 (Penche) 分析中", steps: pencheSteps, hint: "若已开启 MediaPipe 窗口，请在运行服务器的电脑上查看弹出窗口中的实时姿态。" },
+      "2": { title: "交换腿鹿跳结环 (1.2096) 分析中", steps: rhythmicSteps, hint: "" },
+      "3": { title: "跨跳结环 (1.2105) 分析中", steps: rhythmicSteps, hint: "" },
+      "4": { title: "后屈腿转体 (3.1203) 分析中", steps: turnSteps, hint: "若已开启 YOLO 窗口，请在运行服务器的电脑上查看弹出窗口中的姿态与旋转。" }
+    };
+    var config = stepConfig[toolId];
     var stepIndex = 0;
     var stepInterval = null;
-    if (isPenche) {
+    var steps = config ? config.steps : [];
+    if (config && steps.length) {
       loadingSimple.style.display = "none";
       loadingSteps.style.display = "block";
+      document.getElementById("loading-steps-title").textContent = config.title;
+      var hintEl = document.getElementById("loading-steps-hint");
+      if (config.hint) {
+        hintEl.textContent = config.hint;
+        hintEl.style.display = "block";
+      } else {
+        hintEl.style.display = "none";
+      }
       var listEl = document.getElementById("loading-steps-list");
-      listEl.innerHTML = pencheSteps.map(function (text, i) {
+      listEl.innerHTML = steps.map(function (text, i) {
         return "<li id=\"step-" + i + "\"><span class=\"step-spinner\"></span>" + text + "</li>";
       }).join("");
       function updateStep() {
-        for (var j = 0; j < pencheSteps.length; j++) {
+        for (var j = 0; j < steps.length; j++) {
           var li = document.getElementById("step-" + j);
           if (!li) continue;
           var icon = li.querySelector(".step-spinner, .step-done");
@@ -142,7 +169,7 @@
         }
       }
       stepInterval = setInterval(function () {
-        stepIndex = (stepIndex + 1) % pencheSteps.length;
+        stepIndex = (stepIndex + 1) % steps.length;
         updateStep();
       }, 8000);
       updateStep();
@@ -154,7 +181,8 @@
       body: JSON.stringify({
         tool_id: toolId,
         video_id: parseInt(videoId, 10),
-        show_mediapipe_window: isPenche
+        show_mediapipe_window: isPenche,
+        show_yolo_window: toolId === "4"
       })
     })
       .then(r => r.json().then(data => ({ status: r.status, data })))

@@ -57,30 +57,41 @@
             .join("");
         }
 
-        var dScore = null, eScore = null;
-        var dMatch = text.match(/(?:D分|难度分|DB|D-score)[：:\s]*(有效|无效|[0-5](?:\.\d+)?)/i);
-        if (dMatch) dScore = dMatch[1];
-        if (dScore === null) { dMatch = text.match(/难度分为?\s*([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
-        if (dScore === null) { dMatch = text.match(/难度分[^0-9]*([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
-        if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
-        if (dScore === null) { dMatch = text.match(/得分\s*[：:（(]?\s*([0-5](?:\.\d+)?)\s*[）)]?/); if (dMatch) dScore = dMatch[1]; }
-        if (dScore === null) { dMatch = text.match(/(?:D分|难度判定)[^\n]*?([0-5](?:\.\d+)?)\s*[）)]/); if (dMatch) dScore = dMatch[1]; }
-        if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]{0,80}?([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
-        var m = text.match(/(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－-]?\d*\.?\d+)/i);
-        if (m) eScore = m[1].replace(/－/g, "-");
-        if (eScore === null) { m = text.match(/(?:E分|E-score)[^0-9－-]*([－-]?\d*\.?\d+)/i); if (m) eScore = m[1].replace(/－/g, "-"); }
-        if (eScore === null) { m = text.match(/扣分[^0-9－-]*([－-]?\d*\.?\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
-        if (eScore === null) { m = text.match(/(?:E|扣)[^\n]*?([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
-        if (eScore === null) { m = text.match(/([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+        // Prefer backend values from run result (set by pipeline for all tools)
+        var dScore = (data.d_score !== undefined && data.d_score !== null && data.d_score !== "") ? String(data.d_score) : null;
+        var eScore = (data.e_score !== undefined && data.e_score !== null && data.e_score !== "") ? String(data.e_score) : null;
+
+        // Fallback: parse from report text when backend did not provide scores
+        if (dScore === null || eScore === null) {
+          var dMatch = text.match(/(?:D分|难度分|DB|D-score)[：:\s]*(有效|无效|[0-5](?:\.\d+)?)/i);
+          if (dScore === null && dMatch) dScore = dMatch[1];
+          if (dScore === null) { dMatch = text.match(/难度分为?\s*([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/难度分[^0-9]*([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/得分\s*[：:（(]?\s*([0-5](?:\.\d+)?)\s*[）)]?/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/判定\s*[（(]\s*无效\s*[）)][^\n]*得分\s*[（(]?\s*([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/(?:D分|难度判定)[^\n]*?([0-5](?:\.\d+)?)\s*[）)]/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]{0,80}?([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
+          if (dScore === null) { dMatch = text.match(/得分\s*[（(]?\s*([0-5](?:\.\d+)?)\s*[）)]/); if (dMatch) dScore = dMatch[1]; }
+
+          var m = text.match(/(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－\-]?\d*\.?\d+)/i);
+          if (eScore === null && m) eScore = m[1].replace(/－/g, "-");
+          if (eScore === null) { m = text.match(/总扣分\s*[（(]?\s*(\d*\.?\d+)\s*[）)]?/); if (m) eScore = "-" + m[1]; }
+          if (eScore === null) { m = text.match(/(?:E分|E-score)[^0-9－-]*([－-]?\d*\.?\d+)/i); if (m) eScore = m[1].replace(/－/g, "-"); }
+          if (eScore === null) { m = text.match(/扣分[^0-9－-]*([－-]?\d*\.?\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+          if (eScore === null) { m = text.match(/(?:E|扣)[^\n]*?([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+          if (eScore === null) { m = text.match(/([－-]0\.\d+)/); if (m) eScore = m[1].replace(/－/g, "-"); }
+        }
+
+        // Normalize display: show 0.0 when D is "无效"
+        var dDisplay = (dScore && String(dScore).trim() === "无效") ? "0.0" : (dScore !== null ? dScore : "—");
+        var eDisplay = eScore !== null ? eScore : "—";
 
         var boxesEl = document.getElementById("score-boxes");
-        if (dScore !== null || eScore !== null) {
-          boxesEl.innerHTML =
-            "<div class=\"score-box d-score\"><div class=\"score-label\">D 分</div><div class=\"score-value\">" + (dScore !== null ? dScore : "—") + "</div></div>" +
-            "<div class=\"score-box e-score\"><div class=\"score-label\">E 分</div><div class=\"score-value\">" + (eScore !== null ? eScore : "—") + "</div></div>";
-        } else {
-          boxesEl.style.display = "none";
-        }
+        boxesEl.style.display = "block";
+        boxesEl.innerHTML =
+          "<div class=\"score-box d-score\"><div class=\"score-label\">D 分</div><div class=\"score-value\">" + dDisplay + "</div></div>" +
+          "<div class=\"score-box e-score\"><div class=\"score-label\">E 分</div><div class=\"score-value\">" + eDisplay + "</div></div>";
 
         document.getElementById("report-content").innerHTML = formatReportBody(text);
       } catch (e) {
