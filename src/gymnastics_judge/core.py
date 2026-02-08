@@ -1,4 +1,5 @@
-from typing import Protocol, Any, Dict, Optional
+import os
+from typing import Protocol, Any, Dict, List, Optional
 from google import genai
 from google.genai import types
 from .config import Config
@@ -610,6 +611,81 @@ class JudgeAgent:
             },
         }
     
+    def _sample_report_frames(
+        self,
+        video_path: Optional[str] = None,
+        peak_image_path: Optional[str] = None,
+        hold_window_1s: Optional[Dict[str, Any]] = None,
+        max_frames: int = 5,
+    ) -> List[types.Part]:
+        """
+        Sample key frames for the comprehensive report vision input.
+        Returns list of image Parts: from peak_image_path and/or video (hold window or middle).
+        """
+        parts: List[types.Part] = []
+        if peak_image_path and os.path.isfile(peak_image_path):
+            try:
+                with open(peak_image_path, "rb") as f:
+                    data = f.read()
+                parts.append(types.Part.from_bytes(data=data, mime_type="image/jpeg"))
+            except Exception:
+                pass
+        if video_path and os.path.isfile(video_path) and len(parts) < max_frames:
+            try:
+                import cv2
+            except Exception:
+                return parts
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                return parts
+            try:
+                fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+                start_f, end_f, peak_f = None, None, None
+                if hold_window_1s:
+                    start_f = hold_window_1s.get("window_start_frame")
+                    end_f = hold_window_1s.get("window_end_frame")
+                    peak_f = hold_window_1s.get("peak_frame_within_hold")
+                if isinstance(start_f, int) and isinstance(end_f, int) and end_f >= start_f:
+                    indices = []
+                    peak_f = int(peak_f) if isinstance(peak_f, (int, float)) else (start_f + end_f) // 2
+                    for i in [start_f, (start_f + peak_f) // 2, peak_f, (peak_f + end_f) // 2, end_f]:
+                        if start_f <= i <= end_f and i not in indices:
+                            indices.append(i)
+                    if len(indices) > max_frames - len(parts):
+                        indices = indices[: max_frames - len(parts)]
+                    for frame_idx in indices:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_idx - 1))
+                        ret, frame = cap.read()
+                        if not ret:
+                            continue
+                        h, w = frame.shape[:2]
+                        if w > 960:
+                            scale = 960 / float(w)
+                            frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+                        if ok:
+                            parts.append(types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg"))
+                else:
+                    need = max_frames - len(parts)
+                    step = max(1, total_frames // (need + 1)) if total_frames > 0 else 1
+                    for i in range(need):
+                        frame_idx = min(i * step, total_frames - 1) if total_frames else 0
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_idx))
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        h, w = frame.shape[:2]
+                        if w > 960:
+                            scale = 960 / float(w)
+                            frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+                        if ok:
+                            parts.append(types.Part.from_bytes(data=buf.tobytes(), mime_type="image/jpeg"))
+            finally:
+                cap.release()
+        return parts
+
     async def _generate_content(self, user_prompt: str) -> str:
         """Call Gemini with retry over model names. Returns response.text."""
         model_names_to_try = self._model_names_to_try()
@@ -630,6 +706,31 @@ class JudgeAgent:
             f"Could not find a valid Gemini model. Tried: {model_names_to_try}. "
             f"Last error: {last_error}. "
             f"Please check your API key and available models."
+        ) from last_error
+
+    async def _generate_content_with_vision(self, user_prompt: str, image_parts: List[types.Part]) -> str:
+        """Call Gemini with text + images; prefers vision-capable models. Returns response.text."""
+        model_try_order = ["gemini-2.5-pro", "gemini-2.5-flash", *self._model_names_to_try()]
+        seen = set()
+        last_error = None
+        contents = [types.Part.from_text(text=user_prompt), *image_parts]
+        for model_name in model_try_order:
+            if model_name in seen:
+                continue
+            seen.add(model_name)
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                )
+                return response.text or ""
+            except Exception as e:
+                last_error = e
+                if "404" not in str(e) and "not found" not in str(e).lower():
+                    raise
+                continue
+        raise RuntimeError(
+            f"Could not find a valid Gemini vision model. Last error: {last_error}"
         ) from last_error
 
     async def evaluate(self, tool_output: Dict[str, Any], context_prompt: str) -> str:
@@ -662,11 +763,18 @@ class JudgeAgent:
         verdict_blob = f"\n\n裁判详细结论（供参考）：\n{judge_verdict}" if judge_verdict else ""
         prompt = f"""你是一位体操裁判。请根据以下技术数据，用中文写一份「简易动作报告」（约100字）。
 
-要求（必须全部用中文，且按此顺序）：
-1. D分：说明有效或无效，以及难度分（0 或 0.5 等，视动作而定）。
-2. E分：说明扣分情况（负数）。
-3. 得分点与扣分点：用文字简要列出主要数据和要点，不要只堆数字。
-4. 最后一句话总结该次动作表现。
+System Role: 你是一名资深的艺术体操国际级裁判，请严格依据 2025-2028 FIG 规则及提供的 CV 测量数据生成简易报告
+Input Data: 接收 Computed Metrics 中的所有数值（如 split_angle_deg, hold_seconds, releve_maintained 等）
+Output Format (严格遵守以下顺序及逻辑):
+1. 动作名称：动作名称及编号（例如：Penche 俯平衡 - 2.1106）
+2. 难度判定 (D分) 与完成审计 (E分)
+- D分：判定 (有效/无效)，得分 (数值)
+- E分：总扣分 (数值)
+3. 得分点（D）与扣分点（E） (数据驱动闭环)
+- 要求：每一项得分与扣分点，必须采用 (专业结论) + (核心实测数据) -> (分值影响) 的三段论模式，通过实测数据进行对照打分。
+4. 总结：
+- 要求：1-2句话简短总结该次动作表现，请基于得分（D）与失分（E）情况进行梯队等级评价——需进步/已达标/表现佳/很完美
+（示例：本次动作技术规范，表现佳）
 
 技术数据（JSON）：
 {data_blob}
@@ -680,29 +788,63 @@ class JudgeAgent:
         tool_name: str,
         tool_output: Dict[str, Any],
         judge_verdict: Optional[str] = None,
+        *,
+        video_path: Optional[str] = None,
+        peak_image_path: Optional[str] = None,
+        hold_window_1s: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Generate a student-oriented comprehensive report in Chinese (~200 words):
         well-done points, improvement points, recommended next steps.
+        If video_path and/or peak_image_path / hold_window_1s are provided, key frames
+        are sent to the LLM so the report can be informed by both statistics and vision
+        (still primarily based on the technical data).
         """
         import json
         data_blob = json.dumps(tool_output, indent=2, ensure_ascii=False)
         verdict_blob = f"\n\n裁判详细结论（供参考）：\n{judge_verdict}" if judge_verdict else ""
-        # IMPROVE THIS PROMPT TO BE MORE CONCISE AND TO THE POINT
-        prompt = f"""你是一位体操教练/裁判。请根据以下技术数据与裁判结论，用中文写一份「综合报告」（约200字），面向学生/运动员。
+        prompt = f"""你是一名资深的艺术体操国际级裁判及高级教练。请基于提供的 Computed Metrics 数据与视频视觉观察，输出一份针对运动员的深度分析报告（约300字）。
 
 动作/工具名称：{tool_name}
 
-要求（全部用中文）：
-1. 做得好的地方：约3句话/要点。
-2. 需要改进的地方：约3句话/要点。
-3. 建议的下一步改进：约2～3句话/要点。
+[Output Principles]:
+- 数据优先原则：始终以 JSON 格式的 Computed Metrics 实测数据作为判定的事实准则；严禁凭多模态视觉直觉推翻、修正或得出任何与实测数据相悖的结论。
+- 观察任务：请开启多模态审计权限，在参考数据的同时深度观察视频，作为判定的视觉辅助。
+- 数据驱动：分析必须与实测数据（如180度开度、定格秒数、结环角度）形成强闭环。
+
+Output Format（严格遵守，勿用 markdown 表格）：
+- 请用**分点叙述**（小标题 + 短段落或 bullet），不要使用 markdown 表格（禁止使用 | 分隔符），不要在行末或句中加 |。
+- 四维分析每项单独成段，每段先写维度名再写内容，保持段落简洁易读。
+
+1. 身体难度 (DB) 四维深度分析
+- 姿态 (Shape)：先写「数据判定」（劈叉开度、结环偏差等），再写「视觉观察」一两句。
+- 动力性 (Dynamics)：数据判定（如转体圈数）；视觉观察（起势、滞空感、速度感等）一两句。
+- 稳定性 (Stability)：数据判定（定格时间、重心等）；视觉观察（轴心、晃动等）一两句。
+- 动作规范性 (Precision)：视觉观察（立踵、脚背、膝盖、姿态规范性）一两句。
+
+2. 身体难度动作优点与不足
+- 核心优点：引用实测数据说明突出能力，一两句即可。
+- 关键短板：引用失分最重的指标说明不足，一两句即可。
+
+3. 针对性练习建议
+- 根据关键短板给出 1～2 条具体练习建议，每条一两句。
+
+**重要**：结论必须以技术数据（JSON）和裁判结论为主要依据。若下方附有关键动作画面，可结合画面补充观察，但不要与数据矛盾。整篇请用自然段落与分点，勿用表格或 | 符号。
 
 技术数据（JSON）：
 {data_blob}
 {verdict_blob}
 
 请直接输出中文综合报告，不要输出 JSON 或代码块。"""
+        image_parts = self._sample_report_frames(
+            video_path=video_path,
+            peak_image_path=peak_image_path,
+            hold_window_1s=hold_window_1s,
+            max_frames=5,
+        )
+        if image_parts:
+            prompt_vision = prompt + "\n\n下方附有关键动作画面（按时间或动作阶段），供你结合数据参考。"
+            return await self._generate_content_with_vision(prompt_vision, image_parts)
         return await self._generate_content(prompt)
 
     async def overall_person_report(
@@ -731,30 +873,44 @@ class JudgeAgent:
             ensure_ascii=False,
         )
 
-        prompt = """你是一位艺术体操/体操裁判与教练。请根据以下「多个身体难度」的单独分析结果，生成一份「身体难度与运动员深度分析报告」（反馈报告形式3）。
+        prompt = """你是一名资深的艺术体操国际级裁判及高级教练。请根据 Computed Metrics 实测数据 与视频多模态观察，生成一份具备因果诊断逻辑的运动员深度分析报告。
 
-## 输入
-每个身体难度（平衡/跳跃/转体等）已有：简易报告、综合报告，以及可能有的裁判结论。请据此综合写出整体报告。
+[Output Principles]:
+- 硬数据 (Source of Truth)：Computed Metrics 中的数值（如角度、时长、位移、立踵状态）是判定优缺点的绝对依据。
+- 多模态观察 (Visual Assist)：利用视觉能力观察数据无法覆盖的细节，如：进入动作的动力性，跳跃滞空感，手部隐蔽支撑，身体出现细微晃动/抖动。
 
-## 你必须输出的 JSON 结构（严格按此字段名）
+Input Data：
+- 每个身体难度（平衡/跳跃/转体等）已有：简易报告、综合报告，以及裁判结论，请根据此综合写出整体报告。
 
-1. **per_element**：数组，与输入顺序一致。每项包含：
-   - element_name: 该动作中文名（与 tool_name 对应）
-   - pro: 该动作的一个优点（一句话）
-   - con: 该动作的一个不足（一句话）
-   - comment: 一句简短总评
+Output format（必须输出的 JSON 结构）：
+- 每个身体难度动作：数组，与输入顺序一致。每项包含：
+    - 动作名称（编号）
+    - 得分 (D) 与扣分 (E) 情况
 
-2. **radar**：四维度画像，每项 1–10 分（整数）。根据各动作表现由你综合判断：
-   - A: 姿态与柔韧性 (Aesthetics & Amplitude) — 形态幅度、开度、柔韧
-   - B: 动力性与爆发力 (The Engine) — 滞空感、速度感、弹跳
-   - C: 技术规范 (Cleanliness) — 基本功、立踵、膝盖、脚背等细节
-   - D: 稳定性 (Axis & Centering) — 轴心、重心、平衡、有无跑位/歪斜
+- 运动员全方位能力评估：四维度图像与文字总结，每项 1–10 分（整数）
+    - 评分逻辑：根据各类身体难度 (DB) 的四维深度分析，综合评估该运动员的各项核心能力：
+        - 姿态 (Shape)：
+            - 数据判定：劈叉开度，结环偏差。
+        - 动力性 (Dynamics)：
+            - 数据判定：转体动作圈数
+            - 视觉观察：所有类型动作的动力过程（例如：起势果断，力量传递流畅；或进入动作过程存在借力，不够干脆）
+            - 视觉观察：平衡动作的进入和撤势速度，跳跃动作的弹跳高度和滞空感，转体动作的速度感。
+        - 稳定性 (Stability)：
+            - 数据判定：定格时间，失去重心，地面接触。
+            - 视觉观察：重心位移，轴心不稳定，动作过程中存在明显的晃动和移动。
+        - 动作规范性 (Precision)：
+            - 视觉观察：立踵高度，脚背弧度，膝盖锁死，固定姿态规范性。
 
-3. **athlete_profile**：一段话，运动员画像：优势与劣势（中文）。
+- 运动员画像：根据“全方位能力画像”和“四维分析”
+    - 身体难度倾向分析：对比并锁定该运动员最擅长和最薄弱的身体难度类别。
+    - 核心优势：锁定得分最高的难度动作，对应运动员最突出的底层能力，给予权威级的肯定和表扬。
+    - 核心弱项：锁定得分最低，且在多个动作中共同出现的底层能力缺陷。
 
-4. **practice_guide**：一段话，练习建议与训练指南（中文）。
-
-5. **full_report**：1～2 段、约 100 字的全文总结（中文），包含：具体要点、优缺点、改进方向、总体评价。语言通俗，面向家长/学生。
+- 练习建议与训练指南：
+    - [针对性训练]：针对上述短板，提供专业艺术体操练习方法（如：针对立踵不稳，建议加强踝关节力量训练及居家提踵练习）
+    - [日常重点]：指明下一次训练中应优先关注的 1-2 个核心技术点。
+    
+- 总结：约 50 字的全文总结，精炼要点与优缺点，陈述改进方向与总体评价；语言风格保持专业和力量感，确保家长能听懂价值，学生能获得动力。
 
 请仅输出合法 JSON，不要输出 markdown 代码块或其它前后文字。"""
 

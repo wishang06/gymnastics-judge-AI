@@ -86,7 +86,7 @@
         document.getElementById("loading").style.display = "none";
         document.getElementById("result").style.display = "block";
         const media = document.getElementById("media-container");
-        if (data.is_penche && data.video_url) {
+        if (data.video_url) {
           const video = document.createElement("video");
           video.controls = true;
           video.src = data.video_url;
@@ -171,7 +171,7 @@
         sessionStorage.setItem(RUN_VIDEO_ID_KEY, String(videoId));
         document.getElementById("result").style.display = "block";
         const media = document.getElementById("media-container");
-        if (data.is_penche && data.video_url) {
+        if (data.video_url) {
           const video = document.createElement("video");
           video.controls = true;
           video.src = data.video_url;

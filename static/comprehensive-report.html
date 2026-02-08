@@ -15,6 +15,18 @@
       border-left: 4px solid #a855f7;
     }
     .report-panel .report-content { margin: 0; }
+    .report-panel .report-h3 {
+      font-size: 1.05rem;
+      color: var(--accent);
+      margin: 1.25rem 0 0.5rem 0;
+      font-weight: 600;
+    }
+    .report-panel .report-h3:first-child { margin-top: 0; }
+    .report-panel .report-p {
+      margin: 0 0 0.75rem 0;
+      line-height: 1.7;
+      color: var(--text-primary);
+    }
   </style>
 </head>
 <body>
@@ -49,20 +61,30 @@
         document.getElementById("report-panel").style.display = "block";
 
         function formatReportBody(s) {
-          return s
-            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-            .split(/\n\n+/)
-            .map(function (p) {
-              p = p.trim();
-              if (!p) return "";
-              var head = p.match(/^(\d+[.．]、?|【[^】]+】|做得好的地方|需改进处|建议下一步)[：:]\s*/);
-              if (head) {
-                p = p.slice(head[0].length);
-                return "<h3>" + head[1].replace(/[：:]\s*$/, "") + "</h3><p>" + p.replace(/\n/g, "<br>") + "</p>";
-              }
-              return "<p>" + p.replace(/\n/g, "<br>") + "</p>";
-            })
-            .join("");
+          s = s
+            .replace(/\|\s*$/gm, "")
+            .replace(/\|/g, " · ")
+            .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+          var blocks = s.split(/\n\n+/);
+          var out = [];
+          var sectionHeads = /^(\d+[.．]\s*[^：:\n]+|身体难度\s*\(DB\)\s*四维|姿态\s*\(Shape\)|动力性\s*\(Dynamics\)|稳定性\s*\(Stability\)|动作规范性\s*\(Precision\)|核心优点|关键短板|针对性练习建议|【[^】]+】)[：:]\s*/;
+          blocks.forEach(function (p) {
+            p = p.trim();
+            if (!p) return;
+            var head = p.match(sectionHeads);
+            if (head) {
+              var title = head[1].replace(/[：:]\s*$/, "").trim();
+              p = p.slice(head[0].length).trim();
+              out.push("<h3 class=\"report-h3\">" + title + "</h3>");
+            }
+            var paras = p.split(/\n/).filter(function (line) { return line.trim(); });
+            paras.forEach(function (line) {
+              line = line.replace(/^[-*]\s*/, "").trim();
+              if (line) out.push("<p class=\"report-p\">" + line.replace(/\n/g, "<br>") + "</p>");
+            });
+            if (paras.length === 0 && p) out.push("<p class=\"report-p\">" + p.replace(/\n/g, "<br>") + "</p>");
+          });
+          return out.length ? out.join("") : "<p>" + s.replace(/\n/g, "<br>") + "</p>";
         }
         document.getElementById("report-content").innerHTML = formatReportBody(text);
       } catch (e) {

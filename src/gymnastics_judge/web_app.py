@@ -24,9 +24,10 @@ TOOLS_CONFIG = [
     {"id": "1", "name": "平衡腿结环 (Penche 2.1106)", "name_en": "Penche (2.1106)"},
     {"id": "2", "name": "交换腿鹿跳结环 (1.2096)"},
     {"id": "3", "name": "跨跳结环 (1.2105)"},
+    {"id": "4", "name": "后屈腿转体 (Back Attitude Pivot 3.1203)"},
 ]
 
-VIDEO_DIRS = {"1": "videos/penche", "2": "videos/1_2096", "3": "videos/1_2105"}
+VIDEO_DIRS = {"1": "videos/penche", "2": "videos/1_2096", "3": "videos/1_2105", "4": "videos/3_1203"}
 
 
 def _list_videos(video_dir: str) -> list:

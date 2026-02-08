@@ -11,12 +11,13 @@ from rich.syntax import Syntax
 from rich.table import Table
 from .tools.pose_analyzer import PencheAnalyzer
 from .tools.rhythmic_element_analyzer import RhythmicElementAnalyzer
+from .tools.turn_analyzer import TurnAnalyzer
 
 app = typer.Typer()
 console = Console()
 
-# Video category folders under videos/ (penche = balance; 1_2096 / 1_2105 = FIG rhythmic elements)
-VIDEO_CATEGORY_DIRS = ("videos/penche", "videos/1_2096", "videos/1_2105")
+# Video category folders under videos/
+VIDEO_CATEGORY_DIRS = ("videos/penche", "videos/1_2096", "videos/1_2105", "videos/3_1203")
 
 
 def _ensure_video_categories():
@@ -74,7 +75,8 @@ async def run_judge_system():
         penche = PencheAnalyzer()
         rhythmic_1_2096 = RhythmicElementAnalyzer("1.2096")
         rhythmic_1_2105 = RhythmicElementAnalyzer("1.2105")
-        tools = {"1": penche, "2": rhythmic_1_2096, "3": rhythmic_1_2105}
+        turn_3_1203 = TurnAnalyzer(verbose=False)
+        tools = {"1": penche, "2": rhythmic_1_2096, "3": rhythmic_1_2105, "4": turn_3_1203}
     except Exception as e:
         console.print(f"[bold red]Initialization Error:[/bold red] {e}")
         return
@@ -86,7 +88,8 @@ async def run_judge_system():
     console.print("1. Penche (2.1106)")
     console.print("2. 交换腿鹿跳结环 (1.2096)")
     console.print("3. 跨跳结环 (1.2105)")
-    tool_choice = Prompt.ask("Select tool ID", choices=["1", "2", "3"], default="1")
+    console.print("4. 后屈腿转体 (Back Attitude Pivot 3.1203)")
+    tool_choice = Prompt.ask("Select tool ID", choices=["1", "2", "3", "4"], default="1")
     selected_tool = tools[tool_choice]
 
     # 3. List videos for selected tool (by category folder)
@@ -99,7 +102,7 @@ async def run_judge_system():
         console.print(
             f"[red]No videos (.mp4/.mov) found for this tool.[/red]\n"
             f"Folder: [dim]{video_dir}[/dim]\n"
-            f"Place videos in [bold]videos/penche[/bold], [bold]videos/1_2096[/bold], or [bold]videos/1_2105[/bold] by element."
+            f"Place videos in [bold]videos/penche[/bold], [bold]videos/1_2096[/bold], [bold]videos/1_2105[/bold], or [bold]videos/3_1203[/bold] by element."
         )
         return
 
@@ -124,22 +127,32 @@ async def run_judge_system():
 
     console.print("[green]✓ Analysis Complete[/green]")
 
-    # 5. Branch: Rhythmic tools show FIG report only; Penche continues to hand/relevé/evaluate
+    # 5. Branch: Rhythmic/Turn show FIG report; Penche continues to hand/relevé/evaluate
     is_penche = type(selected_tool).__name__ == "PencheAnalyzer"
     if not is_penche:
-        # Rhythmic element (1.2096 / 1.2105): show FIG audit report
-        score_text = raw_data.get("score_text", "(No report generated)")
-        metrics = raw_data.get("measurements", {})
-        e_info = raw_data.get("e_deductions", {})
-        console.print(
-            f"Split: [cyan]{metrics.get('split_angle', 0):.1f}°[/cyan]  "
-            f"Ring deviation: [cyan]{metrics.get('ring_deviation_angle', 0):.1f}°[/cyan]  "
-            f"E deduction: [red]-{e_info.get('total_deduction', 0):.2f}[/red]"
-        )
-        peak_image = raw_data.get("peak_image")
-        if peak_image:
-            console.print(f"Peak frame saved: [dim]{peak_image}[/dim]")
-        console.print(Panel(score_text.strip(), title=f"FIG Audit — {selected_tool.name}", border_style="green"))
+        # Turn (3.1203): verdict + turn metrics
+        if raw_data.get("verdict") and "D-Score" in raw_data.get("verdict", ""):
+            console.print(
+                f"Turns: [cyan]{raw_data.get('valid_turns', 0)}[/cyan]  "
+                f"Angle: [cyan]{raw_data.get('final_official_angle', 0):.1f}°[/cyan]  "
+                f"D: [cyan]{raw_data.get('d_score', 0)}[/cyan]  "
+                f"E: [red]-{raw_data.get('e_deduction', 0):.2f}[/red]"
+            )
+            console.print(Panel(raw_data["verdict"].strip(), title=f"FIG Audit — {selected_tool.name}", border_style="green"))
+        else:
+            # Rhythmic (1.2096 / 1.2105): FIG audit report
+            score_text = raw_data.get("score_text", "(No report generated)")
+            metrics = raw_data.get("measurements", {})
+            e_info = raw_data.get("e_deductions", {})
+            console.print(
+                f"Split: [cyan]{metrics.get('split_angle', 0):.1f}°[/cyan]  "
+                f"Ring deviation: [cyan]{metrics.get('ring_deviation_angle', 0):.1f}°[/cyan]  "
+                f"E deduction: [red]-{e_info.get('total_deduction', 0):.2f}[/red]"
+            )
+            peak_image = raw_data.get("peak_image")
+            if peak_image:
+                console.print(f"Peak frame saved: [dim]{peak_image}[/dim]")
+            console.print(Panel(score_text.strip(), title=f"FIG Audit — {selected_tool.name}", border_style="green"))
 
         # Simple Move Report (Chinese) — separate call
         from .core import JudgeAgent
@@ -154,7 +167,11 @@ async def run_judge_system():
         # Comprehensive Report (Chinese) — separate call
         with console.status("[bold yellow]生成综合报告（中文）...[/bold yellow]"):
             try:
-                comprehensive = await agent.comprehensive_report(selected_tool.name, raw_data)
+                comprehensive = await agent.comprehensive_report(
+                    selected_tool.name,
+                    raw_data,
+                    peak_image_path=raw_data.get("peak_image"),
+                )
                 console.print(Panel(comprehensive.strip(), title="综合报告 (Comprehensive Report)", border_style="magenta"))
             except Exception as e:
                 console.print(f"[red]综合报告生成失败:[/red] {e}")
@@ -358,7 +375,11 @@ async def run_judge_system():
     with console.status("[bold yellow]生成综合报告（中文）...[/bold yellow]"):
         try:
             comprehensive = await agent.comprehensive_report(
-                selected_tool.name, raw_data, judge_verdict=verdict
+                selected_tool.name,
+                raw_data,
+                judge_verdict=verdict,
+                video_path=selected_video,
+                hold_window_1s=raw_data.get("hold_window_1s"),
             )
             console.print(Panel(comprehensive.strip(), title="综合报告 (Comprehensive Report)", border_style="magenta"))
         except Exception as e:

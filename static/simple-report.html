@@ -63,6 +63,9 @@
         if (dScore === null) { dMatch = text.match(/难度分为?\s*([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
         if (dScore === null) { dMatch = text.match(/难度分[^0-9]*([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
         if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分/); if (dMatch) dScore = dMatch[1]; }
+        if (dScore === null) { dMatch = text.match(/得分\s*[：:（(]?\s*([0-5](?:\.\d+)?)\s*[）)]?/); if (dMatch) dScore = dMatch[1]; }
+        if (dScore === null) { dMatch = text.match(/(?:D分|难度判定)[^\n]*?([0-5](?:\.\d+)?)\s*[）)]/); if (dMatch) dScore = dMatch[1]; }
+        if (dScore === null) { dMatch = text.match(/(?:D分|难度分)[^\n]{0,80}?([0-5](?:\.\d+)?)/); if (dMatch) dScore = dMatch[1]; }
         var m = text.match(/(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－-]?\d*\.?\d+)/i);
         if (m) eScore = m[1].replace(/－/g, "-");
         if (eScore === null) { m = text.match(/(?:E分|E-score)[^0-9－-]*([－-]?\d*\.?\d+)/i); if (m) eScore = m[1].replace(/－/g, "-"); }

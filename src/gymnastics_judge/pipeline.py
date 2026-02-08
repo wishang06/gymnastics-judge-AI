@@ -52,8 +52,9 @@ def _extract_d_e_scores(simple_report: Optional[str], verdict: Optional[str]) ->
 
 from .tools.pose_analyzer import PencheAnalyzer
 from .tools.rhythmic_element_analyzer import RhythmicElementAnalyzer
+from .tools.turn_analyzer import TurnAnalyzer
 
-VIDEO_CATEGORY_DIRS = ("videos/penche", "videos/1_2096", "videos/1_2105")
+VIDEO_CATEGORY_DIRS = ("videos/penche", "videos/1_2096", "videos/1_2105", "videos/3_1203")
 
 PENCHE_SYSTEM_PROMPT = """
 You are an expert gymnastics judge. You MUST compute the D-score contribution (DB) and total E-score deductions
@@ -154,6 +155,7 @@ def get_tools() -> Dict[str, Any]:
         "1": penche,
         "2": RhythmicElementAnalyzer("1.2096"),
         "3": RhythmicElementAnalyzer("1.2105"),
+        "4": TurnAnalyzer(verbose=False),
     }
 
 
@@ -219,6 +221,11 @@ async def run_single_analysis(
 
     if not result["is_penche"]:
         result["peak_image_path"] = raw_data.get("peak_image")
+        result["verdict"] = raw_data.get("verdict")
+        if raw_data.get("d_score") is not None:
+            result["d_score"] = str(raw_data["d_score"])
+        if raw_data.get("e_deduction") is not None:
+            result["e_score"] = f"-{raw_data['e_deduction']:.2f}"
         from .core import JudgeAgent
         agent = JudgeAgent()
         progress("生成简易动作报告…")
@@ -228,7 +235,13 @@ async def run_single_analysis(
             result["simple_report"] = f"生成失败: {e}"
         progress("生成综合报告…")
         try:
-            result["comprehensive_report"] = (await agent.comprehensive_report(selected_tool.name, raw_data)).strip()
+            result["comprehensive_report"] = (
+                await agent.comprehensive_report(
+                    selected_tool.name,
+                    raw_data,
+                    peak_image_path=raw_data.get("peak_image"),
+                )
+            ).strip()
         except Exception as e:
             result["comprehensive_report"] = f"生成失败: {e}"
         return result
@@ -289,7 +302,15 @@ async def run_single_analysis(
 
     progress("生成综合报告…")
     try:
-        result["comprehensive_report"] = (await agent.comprehensive_report(selected_tool.name, raw_data, judge_verdict=verdict)).strip()
+        result["comprehensive_report"] = (
+            await agent.comprehensive_report(
+                selected_tool.name,
+                raw_data,
+                judge_verdict=verdict,
+                video_path=video_path,
+                hold_window_1s=raw_data.get("hold_window_1s"),
+            )
+        ).strip()
     except Exception as e:
         result["comprehensive_report"] = f"生成失败: {e}"
 
@@ -330,8 +351,8 @@ async def run_overall_analysis(
             "verdict": single.get("verdict"),
             "simple_report": single.get("simple_report"),
             "comprehensive_report": single.get("comprehensive_report"),
-            "d_score": d_score,
-            "e_score": e_score,
+            "d_score": single.get("d_score") or d_score,
+            "e_score": single.get("e_score") or e_score,
         })
 
     progress("正在生成运动员整体报告…")

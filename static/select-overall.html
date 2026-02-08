@@ -45,7 +45,8 @@
     const TOOLS = [
       { id: "1", name: "平衡腿结环 (Penche 2.1106)" },
       { id: "2", name: "交换腿鹿跳结环 (1.2096)" },
-      { id: "3", name: "跨跳结环 (1.2105)" }
+      { id: "3", name: "跨跳结环 (1.2105)" },
+      { id: "4", name: "后屈腿转体 (3.1203)" }
     ];
     const OVERALL_SELECTION_KEY = "gymnastics_overall_selection";
     let slots = []; // { tool_id, video_id, tool_name, video_name, video_path }
@@ -73,8 +74,16 @@
         slot.style.cursor = "pointer";
         slot.onclick = (e) => { if (e.target.classList.contains("btn-remove")) return; openPicker(idx); };
       });
-      document.getElementById("btn-run").style.display = slots.length >= 2 ? "inline-block" : "none";
-      document.getElementById("min-hint").textContent = slots.length >= 2 ? "已选 " + slots.length + " 项，可开始分析" : "至少需要 2 项";
+      var allHaveVideo = slots.length > 0 && slots.every(function (s) { return s.video_name != null && s.video_name !== ""; });
+      var canStart = slots.length >= 2 && allHaveVideo;
+      document.getElementById("btn-run").style.display = canStart ? "inline-block" : "none";
+      if (slots.length < 2) {
+        document.getElementById("min-hint").textContent = "至少需要 2 项";
+      } else if (!allHaveVideo) {
+        document.getElementById("min-hint").textContent = "已选 " + slots.length + " 项，请为每一项选择视频（点击该行或添加后选择）";
+      } else {
+        document.getElementById("min-hint").textContent = "已选 " + slots.length + " 项，可开始分析";
+      }
     }
 
     function saveAndUpdateRunButton() {
