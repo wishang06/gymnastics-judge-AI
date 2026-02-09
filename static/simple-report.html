@@ -24,6 +24,9 @@
     <div id="no-data" class="loading" style="display:none;">暂无报告数据，请先完成一次分析。</div>
     <div id="report-panel" class="report-panel" style="display:none;">
       <div class="score-boxes" id="score-boxes"></div>
+      <div id="peak-image-wrap" style="margin: 1rem 0; text-align: center; display:none;">
+        <img id="peak-image" alt="峰值图像 / 审计帧" style="max-width:100%; border-radius:8px; border:1px solid var(--border);" />
+      </div>
       <div class="report-content" id="report-content"></div>
     </div>
     <div class="nav-links">
@@ -48,6 +51,14 @@
         const data = JSON.parse(raw);
         let text = data.simple_report || "（无简易报告内容）";
         document.getElementById("report-panel").style.display = "block";
+
+        // Show peak/audit image when available (e.g. rhythmic tools audit_frames)
+        if (data.peak_image_url) {
+          var imgWrap = document.getElementById("peak-image-wrap");
+          var imgEl = document.getElementById("peak-image");
+          imgEl.src = data.peak_image_url;
+          imgWrap.style.display = "block";
+        }
 
         function formatReportBody(s) {
           return s

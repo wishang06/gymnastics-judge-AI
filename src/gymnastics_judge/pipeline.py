@@ -33,7 +33,8 @@ def _extract_d_e_scores(simple_report: Optional[str], verdict: Optional[str]) ->
         d_m = re.search(r"(?:D分|难度分)[^\n]*?([0-5](?:\.\d+)?)\s*分", text)
         if d_m:
             d_score = d_m.group(1)
-    e_m = re.search(r"(?:E分|扣分|total e-score|e-score deduction|总计扣分)[：:\s]*\s*([－\-]?\d*\.?\d+)", text, re.I)
+    # E 分：只从带有 E/扣分 语境的片段中抓取，避免误用 D 行里的数值
+    e_m = re.search(r"(?:E分|扣分|total e-score|e-score deduction|总计扣分|总扣分)[：:\s]*\s*([－\-]?\d*\.?\d+)", text, re.I)
     if e_m:
         e_score = e_m.group(1).replace("－", "-")
     if not e_score:
@@ -46,10 +47,6 @@ def _extract_d_e_scores(simple_report: Optional[str], verdict: Optional[str]) ->
             e_score = e_m.group(1).replace("－", "-")
     if not e_score:
         e_m = re.search(r"(?:E|扣)[^\n]*?([－\-]0\.\d+)", text)
-        if e_m:
-            e_score = e_m.group(1).replace("－", "-")
-    if not e_score:
-        e_m = re.search(r"([－\-]0\.\d+)", text)
         if e_m:
             e_score = e_m.group(1).replace("－", "-")
     return (d_score, e_score)

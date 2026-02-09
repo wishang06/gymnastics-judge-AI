@@ -85,6 +85,9 @@
     <p class="page-subtitle">面向学生：做得好的地方、需改进处、建议下一步</p>
     <div id="no-data" class="loading" style="display:none;">暂无报告数据，请先完成一次分析。</div>
     <div id="report-panel" class="report-panel" style="display:none;">
+      <div id="peak-image-wrap" style="margin: 0 0 1.25rem 0; text-align: center; display:none;">
+        <img id="peak-image" alt="峰值图像 / 审计帧" style="max-width:100%; border-radius:8px; border:1px solid var(--border);" />
+      </div>
       <div class="report-content" id="report-content"></div>
       <div class="chat-section" id="chat-section">
         <h2>💬 对报告有疑问？向 AI 提问</h2>
@@ -120,8 +123,18 @@
         const text = data.comprehensive_report || "（无综合报告内容）";
         document.getElementById("report-panel").style.display = "block";
 
+        // Show peak/audit image when available (e.g. rhythmic tools audit_frames)
+        if (data.peak_image_url) {
+          var imgWrap = document.getElementById("peak-image-wrap");
+          var imgEl = document.getElementById("peak-image");
+          imgEl.src = data.peak_image_url;
+          imgWrap.style.display = "block";
+        }
+
         function formatReportBody(s) {
           s = s
+            // Turn markdown headings like "### 核心优点" into section titles our parser understands
+            .replace(/^#{3,}\s*([^#\n]+)$/gm, "$1：")
             .replace(/\|\s*$/gm, "")
             .replace(/\|/g, " · ")
             .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
