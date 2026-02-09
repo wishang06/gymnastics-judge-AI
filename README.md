@@ -10,16 +10,19 @@ An AI-powered system for judging gymnastics elements from video: balance (Penche
   - **跨跳结环 (1.2105)** — Rhythmic jump: split & ring (MediaPipe).
   - **后屈腿转体 (3.1203)** — Back Attitude Pivot: rotation & thigh angle, FIG D/E (YOLOv8-Pose).
 - **Reports**
-  - **简易动作报告** — Short report: D/E, scoring/deduction points, one-sentence summary.
-  - **综合报告** — Longer report with strengths, improvements, and next steps (optionally with video frames).
-  - **运动员整体报告** — Multi-video: per-element summary + 4-dimension radar (姿态/柔韧性, 动力性, 技术规范, 稳定性) + athlete profile and practice guide.
+  - **简易动作报告** — Short report with D/E score boxes, scoring/deduction points, one-sentence summary.
+  - **综合报告** — Longer report with strengths, improvements, and next steps (optionally with video frames). Includes **report-context chat**: ask follow-up questions (e.g. what you did well, how to improve, next steps) and get answers from the same Gemini model using the report as context.
+  - **运动员整体报告** — Multi-video: per-element summary + 4-dimension radar (姿态/柔韧性, 动力性, 技术规范, 稳定性) + athlete profile and practice guide. Also includes **report-context chat** so you can ask about the overall analysis.
+- **Web run experience**
+  - **Personalised loading** — Each tool (Penche, 1.2096, 1.2105, 3.1203) has its own step-by-step loading animation on the run page.
+  - **Optional pop-out windows** (on the machine running the server): **Penche** can show a MediaPipe pose overlay window during analysis; **Turn (3.1203)** can show a YOLO overlay window. Enable when starting a run from the web UI.
 - **Interfaces**
-  - **CLI** - Tool and video selection, FIG audit output, simple & comprehensive reports.
-  - **Web app** - Chinese UI: choose tool ? video ? run ? view reports; optional overall report from 2+ videos.
+  - **CLI** — Tool and video selection, FIG audit output, simple & comprehensive reports.
+  - **Web app** — Chinese UI: choose tool → video → run → view reports; optional overall report from 2+ videos.
 
 ## Requirements
 
-- **Python** ? 3.12  
+- **Python** ≥ 3.12  
 - **MediaPipe** Pose Landmarker `.task` file (for Penche and rhythmic tools)  
 - **YOLOv8-Pose** model `yolov8x-pose.pt` (for turn tool 3.1203)  
 - **Google Gemini API key** (for judging and reports)
@@ -81,7 +84,7 @@ uv run python main.py
 python main.py
 ```
 
-1. Choose tool (1?4): Penche, 1.2096, 1.2105, or 3.1203.  
+1. Choose tool (1–4): Penche, 1.2096, 1.2105, or 3.1203.  
 2. Choose a video from the list.  
 3. Wait for analysis; view FIG audit and simple/comprehensive reports in the terminal.
 
@@ -104,8 +107,8 @@ Or use the script:
 
 Then open **http://localhost:5000**.
 
-- **单次动作分析** ? Pick one tool and one video, run, then view simple and comprehensive reports.  
-- **运动员整体报告** ? Pick at least two videos (any tools), run each analysis, then get the combined report with 4-dimension radar and athlete/practice text.
+- **单次动作分析** — Pick one tool and one video, run (with optional MediaPipe or YOLO overlay for Penche / Turn), then view simple and comprehensive reports. On the comprehensive report page, use the chat at the bottom to ask follow-up questions about your move.
+- **运动员整体报告** — Pick at least two videos (any tools), run each analysis, then get the combined report with 4-dimension radar and athlete/practice text. Use the chat at the bottom of the overall report to ask about the analysis.
 
 ## Video layout
 
@@ -168,4 +171,6 @@ See [pyproject.toml](pyproject.toml) for versions.
 - **Rhythmic (1.2096 / 1.2105)**: MediaPipe → peak frame and angles; strict FIG rules for D/E; Gemini for simple and comprehensive reports (with optional peak image).  
 - **Turn (3.1203)**: YOLOv8-Pose → rotation and thigh angle; FIG rules (valid angle ≥70°, turns ≥1, buffer −150°, angle +7.5°); Gemini for Chinese reports.
 
-Overall report: run analysis on each selected video, collect D/E and reports, then one Gemini call to produce per-element pros/cons, 4-dimension scores (1?10), athlete profile, and practice guide.
+Overall report: run analysis on each selected video, collect D/E and reports, then one Gemini call to produce per-element pros/cons, 4-dimension scores (1–10), athlete profile, and practice guide.
+
+**Report chat**: On both the comprehensive and overall report pages, a chat box at the bottom sends your message plus the full report text to the same Gemini model (e.g. `gemini-2.5-flash`). The model is instructed to answer only from the report, so you can ask things like “我哪里做得好？” or “下一步该怎么练？” and get grounded, concise answers.
