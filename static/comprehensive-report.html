@@ -27,6 +27,56 @@
       line-height: 1.7;
       color: var(--text-primary);
     }
+    .chat-section {
+      margin-top: 2.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .chat-section h2 { font-size: 1.15rem; color: var(--accent); margin-bottom: 0.75rem; }
+    .chat-messages {
+      background: var(--bg-dark);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      min-height: 120px;
+      max-height: 320px;
+      overflow-y: auto;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+    }
+    .chat-message { margin-bottom: 0.75rem; display: flex; }
+    .chat-message.user { justify-content: flex-end; }
+    .chat-message .bubble {
+      max-width: 85%;
+      padding: 0.6rem 1rem;
+      border-radius: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .chat-message.user .bubble { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+    .chat-message.model .bubble { background: var(--bg-card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+    .chat-typing { color: var(--text-muted); font-size: 0.9rem; padding: 0.5rem 0; }
+    .chat-input-row { display: flex; gap: 0.5rem; align-items: stretch; }
+    .chat-input-row input {
+      flex: 1;
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      color: var(--text-primary);
+      font-size: 1rem;
+    }
+    .chat-input-row input::placeholder { color: var(--text-muted); }
+    .chat-input-row button {
+      padding: 0.65rem 1.25rem;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .chat-input-row button:disabled { opacity: 0.6; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -36,6 +86,16 @@
     <div id="no-data" class="loading" style="display:none;">暂无报告数据，请先完成一次分析。</div>
     <div id="report-panel" class="report-panel" style="display:none;">
       <div class="report-content" id="report-content"></div>
+      <div class="chat-section" id="chat-section">
+        <h2>💬 对报告有疑问？向 AI 提问</h2>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.75rem;">可询问：做得好的地方、如何改进、下一步建议等，AI 将基于上方报告回答。</p>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-typing" id="chat-typing" style="display:none;">正在思考…</div>
+        <div class="chat-input-row">
+          <input type="text" id="chat-input" placeholder="输入您的问题…" autocomplete="off" />
+          <button type="button" id="chat-send">发送</button>
+        </div>
+      </div>
     </div>
     <div class="nav-links">
       <a href="/run" id="back-run">← 返回分析结果</a>
@@ -87,6 +147,67 @@
           return out.length ? out.join("") : "<p>" + s.replace(/\n/g, "<br>") + "</p>";
         }
         document.getElementById("report-content").innerHTML = formatReportBody(text);
+
+        // Chat about report: use comprehensive_report as context
+        window.reportContext = data.comprehensive_report || "";
+        window.chatHistory = [];
+        var chatMessages = document.getElementById("chat-messages");
+        var chatInput = document.getElementById("chat-input");
+        var chatSend = document.getElementById("chat-send");
+        var chatTyping = document.getElementById("chat-typing");
+
+        function appendMessage(role, content) {
+          var wrap = document.createElement("div");
+          wrap.className = "chat-message " + (role === "user" ? "user" : "model");
+          var bubble = document.createElement("div");
+          bubble.className = "bubble";
+          bubble.textContent = content;
+          wrap.appendChild(bubble);
+          chatMessages.appendChild(wrap);
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function setTyping(show) {
+          chatTyping.style.display = show ? "block" : "none";
+          chatSend.disabled = show;
+          if (show) chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        async function sendChat() {
+          var msg = (chatInput.value || "").trim();
+          if (!msg || chatSend.disabled) return;
+          chatInput.value = "";
+          appendMessage("user", msg);
+          window.chatHistory.push({ role: "user", content: msg });
+          setTyping(true);
+          try {
+            var res = await fetch("/api/report-chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                report_context: window.reportContext,
+                message: msg,
+                history: window.chatHistory.slice(0, -1)
+              })
+            });
+            var chatData = await res.json();
+            setTyping(false);
+            if (res.ok && chatData.reply) {
+              appendMessage("model", chatData.reply);
+              window.chatHistory.push({ role: "model", content: chatData.reply });
+            } else {
+              appendMessage("model", "回复失败：" + (chatData.error || res.statusText));
+            }
+          } catch (e) {
+            setTyping(false);
+            appendMessage("model", "请求失败，请稍后重试。");
+          }
+        }
+
+        chatSend.addEventListener("click", sendChat);
+        chatInput.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+        });
       } catch (e) {
         document.getElementById("no-data").style.display = "block";
       }

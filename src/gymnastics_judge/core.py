@@ -783,6 +783,45 @@ class JudgeAgent:
             f"Could not find a valid Gemini vision model. Last error: {last_error}"
         ) from last_error
 
+    async def chat_about_report(
+        self,
+        report_context: str,
+        user_message: str,
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> str:
+        """
+        Answer user questions about a gymnastics report using the same Gemini model.
+        report_context: full report text (comprehensive or overall).
+        user_message: current user question.
+        history: optional list of {"role": "user"|"model", "content": "..."} for multi-turn.
+        """
+        if not (report_context or "").strip():
+            return "暂无报告内容可供参考，请先完成分析并查看报告。"
+        if not (user_message or "").strip():
+            return "请输入您的问题。"
+
+        lines = [
+            "你是一位专业的体操教练与裁判助手。请仅根据下面提供的报告内容回答用户问题。",
+            "回答要简洁、专业、有针对性。可用中文。若报告未涉及所问内容，请如实说明。",
+            "",
+            "========== 报告内容 ==========",
+            (report_context or "").strip(),
+            "==================================",
+            "",
+        ]
+        history = history or []
+        for turn in history:
+            role = turn.get("role") or "user"
+            content = (turn.get("content") or "").strip()
+            if not content:
+                continue
+            label = "用户" if role == "user" else "助手"
+            lines.append(f"{label}：{content}")
+            lines.append("")
+        lines.append("用户：" + (user_message or "").strip())
+        prompt = "\n".join(lines)
+        return await self._generate_content(prompt)
+
     async def evaluate(self, tool_output: Dict[str, Any], context_prompt: str) -> str:
         """
         Send tool output to LLM for evaluation

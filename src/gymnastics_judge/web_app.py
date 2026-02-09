@@ -261,6 +261,34 @@ def serve_audit():
     return send_from_directory(path.parent, path.name, mimetype="image/jpeg")
 
 
+@app.route("/api/report-chat", methods=["POST"])
+def api_report_chat():
+    """Chat about a report (comprehensive or overall). Uses same Gemini model as the rest of the app."""
+    data = request.get_json() or {}
+    report_context = data.get("report_context") or ""
+    message = (data.get("message") or "").strip()
+    history = data.get("history")
+    if not isinstance(history, list):
+        history = []
+    if not message:
+        return jsonify({"error": "请输入您的问题。"}), 400
+
+    async def _chat():
+        from .core import JudgeAgent
+        agent = JudgeAgent()
+        return await agent.chat_about_report(report_context, message, history=history)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        reply = loop.run_until_complete(_chat())
+        return jsonify({"reply": reply})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+
 def main():
     from .pipeline import ensure_video_categories
     ensure_video_categories()
